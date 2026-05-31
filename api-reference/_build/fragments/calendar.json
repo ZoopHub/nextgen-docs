@@ -1,0 +1,960 @@
+{
+  "tag": {
+    "name": "Calendar",
+    "description": "Calendar events, availability, holds, the iCal feed, and job scheduling."
+  },
+  "paths": {
+    "/calendar/items": {
+      "get": {
+        "tags": ["Calendar"],
+        "operationId": "listCalendarItems",
+        "summary": "Fetch calendar grid items for a date range",
+        "description": "**Required scope:** `read:calendar`\n\nReturns the three calendar row sources (jobs, events, holds) in one round-trip for the calendar grid. RLS scopes rows per role: a tech sees only their own jobs and events and zero holds; owner/office see everything in the tenant. The `from`/`to` window is required and `to` must be strictly after `from`. Holds are returned only for owner/office (empty array for techs).",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "format": "date-time" },
+            "description": "Start of the range (ISO 8601 datetime)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "format": "date-time" },
+            "description": "End of the range (ISO 8601 datetime). Must be strictly after from."
+          },
+          {
+            "name": "assigneeIds",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Comma-separated list of 1-50 assignee user UUIDs. Filters jobs/events to those involving at least one of these users."
+          },
+          {
+            "name": "crewIds",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Comma-separated list of 1-20 crew UUIDs (ZOO-480). Expanded to member user_ids and unioned with assigneeIds before filtering."
+          },
+          {
+            "name": "kinds",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Comma-separated list of 1-4 event kinds (meeting, block, personal, other). Applied to calendar events only; jobs are never filtered by this param."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Calendar items grouped by source.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CalendarJobItem" }
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CalendarEventItem" }
+                    },
+                    "holds": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CalendarHoldItem" }
+                    }
+                  },
+                  "required": ["jobs", "events", "holds"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/availability": {
+      "get": {
+        "tags": ["Calendar"],
+        "operationId": "getCalendarAvailability",
+        "summary": "Get busy intervals for a date range",
+        "description": "**Required scope:** `read:calendar`\n\nReturns merged busy intervals (jobs, events, and — for owner/office only — pending holds) over the requested range. Tech callers never receive hold-derived intervals. `to` must be strictly after `from`.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "format": "date-time" },
+            "description": "Start of the range (ISO 8601 datetime)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "format": "date-time" },
+            "description": "End of the range (ISO 8601 datetime). Must be strictly after from."
+          },
+          {
+            "name": "assigneeIds",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Comma-separated list of 1-50 assignee user UUIDs. Restricts intervals to those involving at least one listed assignee (intervals that block everyone are always retained)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Busy intervals for the range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "intervals": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CalendarBusyInterval" }
+                    }
+                  },
+                  "required": ["intervals"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/events": {
+      "post": {
+        "tags": ["Calendar"],
+        "operationId": "createCalendarEvent",
+        "summary": "Create a calendar event (one-off or recurring)",
+        "description": "**Required scope:** `write:calendar`\n\nCreates a one-off calendar event, or — when `recurrence` is supplied — a recurring event series whose rolling 90-day window is materialized synchronously. A tech caller may only create event kinds permitted by the tenant's `tech_can_create_event_kinds` setting; other kinds return 403.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CalendarEventCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Event (or series) created. One-off returns event_id; recurring returns series_id and the number of materialized instances.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/CalendarEventCreated" },
+                    { "$ref": "#/components/schemas/CalendarEventSeriesCreated" }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/events/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Calendar event ID."
+        }
+      ],
+      "get": {
+        "tags": ["Calendar"],
+        "operationId": "getCalendarEvent",
+        "summary": "Get a single calendar event",
+        "description": "**Required scope:** `read:calendar`\n\nReturns one event with its assignees and, when the event belongs to a series, the series' recurrence (rrule, timezone, duration_min) for the edit modal.",
+        "responses": {
+          "200": {
+            "description": "The calendar event.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CalendarEventDetail" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Calendar"],
+        "operationId": "updateCalendarEvent",
+        "summary": "Edit a calendar event (series-edit modes)",
+        "description": "**Required scope:** `write:calendar`\n\nOwner or office only (techs receive 403). Edits an event using one of three modes: `this` (this occurrence only), `this_and_future` (caps the series and creates a new series from the occurrence onward), or `all` (edits the whole series template). For `this` and `this_and_future`, `occurrence_date` is required. Non-recurring events accept only `mode=this`. Response shape varies by mode: `this` returns the updated event row; `all` and `this_and_future` return `{ series_id }`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CalendarEventPatch" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event updated. For mode=this, the updated calendar event row; for mode=all and mode=this_and_future, the (possibly new) series id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/CalendarEventRow" },
+                    { "$ref": "#/components/schemas/CalendarEventSeriesRef" }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Calendar"],
+        "operationId": "deleteCalendarEvent",
+        "summary": "Cancel a calendar event (series-cancel modes)",
+        "description": "**Required scope:** `write:calendar`\n\nOwner or office only (techs receive 403). Cancels via the `mode` query param: `this` (this occurrence), `this_and_future` (caps the series and cancels future scheduled occurrences), or `all` (cancels the entire series). Non-recurring events accept only `mode=this`. Rows are soft-cancelled (status set to `cancelled`), preserved for history.",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["this", "this_and_future", "all"],
+              "default": "this"
+            },
+            "description": "Cancellation scope. Defaults to this."
+          }
+        ],
+        "responses": {
+          "204": { "description": "Event(s) cancelled. No content." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/events/{id}/respond": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Calendar event ID."
+        }
+      ],
+      "post": {
+        "tags": ["Calendar"],
+        "operationId": "respondToCalendarEvent",
+        "summary": "Respond to your own event invitation",
+        "description": "**Required scope:** `write:calendar`\n\nThe caller updates their own assignee response (`accepted` or `declined`) for the event. Only the caller's own assignee row is affected. Returns 404 (same shape for cross-tenant events) when the caller is not an assignee of this event in this tenant.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CalendarEventRespond" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "event_id": { "type": "string", "format": "uuid" },
+                    "response": { "type": "string", "enum": ["accepted", "declined"] }
+                  },
+                  "required": ["event_id", "response"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/holds": {
+      "get": {
+        "tags": ["Calendar"],
+        "operationId": "listCalendarHolds",
+        "summary": "List booking holds (holds inbox)",
+        "description": "**Required scope:** `read:calendar`\n\nOwner or office only (techs receive 403). Returns `booking_holds` rows for the dispatcher's holds inbox, filtered by status (default `pending`) and optionally by a `requested_start` window. Pending holds are sorted by soonest expiration; other statuses by most-recent activity. Returns full guest contact info for the tenant.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "confirmed", "released", "expired"],
+              "default": "pending"
+            },
+            "description": "Hold status to list. Defaults to pending."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "format": "date-time" },
+            "description": "Lower bound (inclusive) on requested_start (ISO 8601)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "format": "date-time" },
+            "description": "Upper bound (inclusive) on requested_start (ISO 8601)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Booking holds matching the filter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "holds": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CalendarHold" }
+                    }
+                  },
+                  "required": ["holds"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/holds/{id}/confirm": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Booking hold ID."
+        }
+      ],
+      "post": {
+        "tags": ["Calendar"],
+        "operationId": "confirmCalendarHold",
+        "summary": "Confirm a booking hold (promote to a job)",
+        "description": "**Required scope:** `write:calendar`\n\nOwner or office only (techs receive 403). Atomically promotes a pending hold to a `jobs` row at the customer's requested slot, via the `confirm_booking_hold` RPC. Returns 409 when the hold is no longer pending, 404 when the hold (or referenced crew) is not found, and 400 for payload/business validation errors (e.g. crew tenant mismatch, assigned user not a member).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CalendarHoldConfirm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hold confirmed and promoted to a job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job_id": { "type": "string", "format": "uuid" },
+                    "hold_id": { "type": "string", "format": "uuid" }
+                  },
+                  "required": ["job_id", "hold_id"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/holds/{id}/suggest": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Booking hold ID."
+        }
+      ],
+      "post": {
+        "tags": ["Calendar"],
+        "operationId": "suggestCalendarHoldSlot",
+        "summary": "Propose an alternate slot for a booking hold",
+        "description": "**Required scope:** `write:calendar`\n\nOwner or office only (techs receive 403). Shifts the hold's requested window to a proposed slot, extends `expires_at` by the tenant's hold TTL, mints a one-shot acceptance token, and emails the customer a tokenized accept link. The hold stays `pending`. The slot cannot exceed 8 hours and `requested_end` must be after `requested_start`. Returns 409 when the hold is not pending. Email send failures are best-effort and do not fail the request.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CalendarHoldSuggest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hold window updated and suggestion email dispatched.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hold_id": { "type": "string", "format": "uuid" },
+                    "expires_at": { "type": "string", "format": "date-time" }
+                  },
+                  "required": ["hold_id", "expires_at"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/holds/{id}/release": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Booking hold ID."
+        }
+      ],
+      "post": {
+        "tags": ["Calendar"],
+        "operationId": "releaseCalendarHold",
+        "summary": "Decline (release) a booking hold",
+        "description": "**Required scope:** `write:calendar`\n\nOwner or office only (techs receive 403). Releases a pending hold with a reason and notifies the requestor (email, plus best-effort SMS). Returns 400 when the hold is not pending, and 404 when the hold is not found in this tenant (same shape for cross-tenant holds).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CalendarHoldRelease" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hold released.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "format": "uuid" },
+                    "status": { "type": "string", "enum": ["released"] }
+                  },
+                  "required": ["id", "status"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/calendar/jobs/{id}/reschedule": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Job ID."
+        }
+      ],
+      "patch": {
+        "tags": ["Calendar"],
+        "operationId": "rescheduleCalendarJob",
+        "summary": "Reschedule (drag-drop move) a job",
+        "description": "**Required scope:** `write:jobs`\n\nOwner or office only (techs receive 403). Narrow calendar verb for moving a job to a new slot. Setting `scheduled_start` to null unschedules the job (forces status `unscheduled` and clears `scheduled_end`); a non-null start sets status `scheduled`. `scheduled_end`, when present alongside a start, must be strictly after `scheduled_start`. Returns the updated job row.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CalendarJobReschedule" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated job row.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CalendarJobRow" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "CalendarEventCreate": {
+      "type": "object",
+      "description": "Payload to create a one-off or recurring calendar event.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["meeting", "block", "personal", "other"],
+          "description": "Event kind."
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 2000, "nullable": true },
+        "location_text": { "type": "string", "maxLength": 200, "nullable": true },
+        "location_address": { "type": "string", "maxLength": 500, "nullable": true },
+        "starts_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 datetime (Z or +HH:MM offset accepted)."
+        },
+        "ends_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 datetime; must be strictly after starts_at."
+        },
+        "all_day": { "type": "boolean", "default": false },
+        "assignee_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "format": "uuid" },
+          "description": "At least one assignee user ID."
+        },
+        "recurrence": {
+          "nullable": true,
+          "allOf": [{ "$ref": "#/components/schemas/CalendarRecurrence" }],
+          "description": "When present, creates a recurring event series."
+        }
+      },
+      "required": ["kind", "title", "starts_at", "ends_at", "assignee_ids"]
+    },
+    "CalendarEventPatch": {
+      "type": "object",
+      "description": "Partial event edit. All fields except mode are optional. occurrence_date is required for mode=this and mode=this_and_future.",
+      "properties": {
+        "kind": { "type": "string", "enum": ["meeting", "block", "personal", "other"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 2000, "nullable": true },
+        "location_text": { "type": "string", "maxLength": 200, "nullable": true },
+        "location_address": { "type": "string", "maxLength": 500, "nullable": true },
+        "starts_at": { "type": "string", "format": "date-time" },
+        "ends_at": { "type": "string", "format": "date-time" },
+        "all_day": { "type": "boolean" },
+        "assignee_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "format": "uuid" }
+        },
+        "recurrence": {
+          "nullable": true,
+          "allOf": [{ "$ref": "#/components/schemas/CalendarRecurrence" }],
+          "description": "Series recurrence. Note: passing null is rejected (400) for series-level edits."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["this", "this_and_future", "all"],
+          "default": "this",
+          "description": "Series-edit scope."
+        },
+        "occurrence_date": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Which occurrence is being edited. Required for mode=this and mode=this_and_future."
+        }
+      }
+    },
+    "CalendarRecurrence": {
+      "type": "object",
+      "description": "Recurrence definition for an event series.",
+      "properties": {
+        "rrule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "RFC 5545 RRULE. FREQ must be DAILY, WEEKLY, MONTHLY, or YEARLY (sub-daily blocked). COUNT (if present) <= 366; UNTIL (if present) within 1825 days of now."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "IANA timezone name (validated against Intl.DateTimeFormat)."
+        },
+        "duration_min": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "Occurrence duration in minutes."
+        }
+      },
+      "required": ["rrule", "timezone", "duration_min"]
+    },
+    "CalendarEventRespond": {
+      "type": "object",
+      "description": "Caller's response to their own event invitation.",
+      "properties": {
+        "response": { "type": "string", "enum": ["accepted", "declined"] }
+      },
+      "required": ["response"]
+    },
+    "CalendarHoldConfirm": {
+      "type": "object",
+      "description": "Confirm-hold payload. The slot is not a field — confirm honors the customer's requested window.",
+      "properties": {
+        "assigned_user_ids": {
+          "type": "array",
+          "items": { "type": "string", "format": "uuid" },
+          "default": [],
+          "description": "User IDs to assign to the resulting job."
+        },
+        "crew_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Optional crew to assign to the resulting job."
+        }
+      }
+    },
+    "CalendarHoldSuggest": {
+      "type": "object",
+      "description": "Proposed alternate slot for a booking hold. Window cannot exceed 8 hours.",
+      "properties": {
+        "requested_start": { "type": "string", "format": "date-time" },
+        "requested_end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Must be after requested_start; window <= 8 hours."
+        }
+      },
+      "required": ["requested_start", "requested_end"]
+    },
+    "CalendarHoldRelease": {
+      "type": "object",
+      "description": "Release (decline) a booking hold.",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": ["admin_decline", "customer_cancel", "other"]
+        }
+      },
+      "required": ["reason"]
+    },
+    "CalendarJobReschedule": {
+      "type": "object",
+      "description": "Move a job to a new slot. Setting scheduled_start to null unschedules the job.",
+      "properties": {
+        "scheduled_start": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "New start, or null to unschedule."
+        },
+        "scheduled_end": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Optional new end; when present with a start, must be strictly after scheduled_start."
+        },
+        "assigned_user_ids": {
+          "type": "array",
+          "items": { "type": "string", "format": "uuid" },
+          "description": "Optional replacement assignee set."
+        }
+      },
+      "required": ["scheduled_start"]
+    },
+    "CalendarEventDetail": {
+      "type": "object",
+      "description": "A single calendar event with assignees and (if applicable) recurrence.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "series_id": { "type": "string", "format": "uuid", "nullable": true },
+        "title": { "type": "string" },
+        "kind": { "type": "string", "enum": ["meeting", "block", "personal", "other"] },
+        "starts_at": { "type": "string", "format": "date-time" },
+        "ends_at": { "type": "string", "format": "date-time" },
+        "all_day": { "type": "boolean" },
+        "notes": { "type": "string", "nullable": true },
+        "location_text": { "type": "string", "nullable": true },
+        "location_address": { "type": "string", "nullable": true },
+        "assignee_ids": {
+          "type": "array",
+          "items": { "type": "string", "format": "uuid" }
+        },
+        "recurrence": {
+          "nullable": true,
+          "allOf": [{ "$ref": "#/components/schemas/CalendarRecurrence" }],
+          "description": "Present only when the event belongs to a series."
+        }
+      },
+      "required": [
+        "id",
+        "series_id",
+        "title",
+        "kind",
+        "starts_at",
+        "ends_at",
+        "all_day",
+        "assignee_ids"
+      ]
+    },
+    "CalendarEventCreated": {
+      "type": "object",
+      "description": "Response for a one-off event creation.",
+      "properties": {
+        "event_id": { "type": "string", "format": "uuid" }
+      },
+      "required": ["event_id"]
+    },
+    "CalendarEventSeriesCreated": {
+      "type": "object",
+      "description": "Response for a recurring event-series creation.",
+      "properties": {
+        "series_id": { "type": "string", "format": "uuid" },
+        "inserted": {
+          "type": "integer",
+          "description": "Number of occurrences materialized in the initial 90-day window."
+        }
+      },
+      "required": ["series_id", "inserted"]
+    },
+    "CalendarEventSeriesRef": {
+      "type": "object",
+      "description": "Series reference returned by mode=all and mode=this_and_future edits.",
+      "properties": {
+        "series_id": { "type": "string", "format": "uuid" }
+      },
+      "required": ["series_id"]
+    },
+    "CalendarEventRow": {
+      "type": "object",
+      "description": "A raw calendar_events row, returned by a mode=this edit. Fields below are the confirmed columns; the row may carry additional columns.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "series_id": { "type": "string", "format": "uuid", "nullable": true },
+        "kind": { "type": "string", "enum": ["meeting", "block", "personal", "other"] },
+        "title": { "type": "string" },
+        "notes": { "type": "string", "nullable": true },
+        "location_text": { "type": "string", "nullable": true },
+        "location_address": { "type": "string", "nullable": true },
+        "starts_at": { "type": "string", "format": "date-time" },
+        "ends_at": { "type": "string", "format": "date-time" },
+        "all_day": { "type": "boolean" },
+        "status": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "CalendarBusyInterval": {
+      "type": "object",
+      "description": "A busy interval over the requested range. Serialized from a BusyInterval (Date fields become ISO strings).",
+      "properties": {
+        "start": { "type": "string", "format": "date-time" },
+        "end": { "type": "string", "format": "date-time" },
+        "source": {
+          "type": "string",
+          "enum": ["job", "event", "hold", "closed_hours"],
+          "description": "Origin of the interval."
+        },
+        "id": {
+          "type": "string",
+          "description": "Source row id (UUID for job/event/hold; a synthetic key like closed-<dow>-<date> for closed_hours)."
+        },
+        "assigneeIds": {
+          "type": "array",
+          "items": { "type": "string", "format": "uuid" },
+          "description": "User IDs the interval blocks; empty array means it blocks everyone."
+        },
+        "title": {
+          "type": "string",
+          "description": "Present for job/event intervals when a title exists."
+        }
+      },
+      "required": ["start", "end", "source", "id", "assigneeIds"]
+    },
+    "CalendarJobItem": {
+      "type": "object",
+      "description": "A scheduled job as returned in the calendar grid items payload.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "title": { "type": "string", "nullable": true },
+        "scheduled_start": { "type": "string", "format": "date-time", "nullable": true },
+        "scheduled_end": { "type": "string", "format": "date-time", "nullable": true },
+        "status": { "type": "string" },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "assignments": {
+          "type": "array",
+          "description": "Per-assignee join rows.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "user_id": { "type": "string", "format": "uuid" }
+            },
+            "required": ["user_id"]
+          }
+        }
+      },
+      "required": ["id", "scheduled_start", "status"]
+    },
+    "CalendarEventItem": {
+      "type": "object",
+      "description": "A scheduled calendar event as returned in the calendar grid items payload.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "kind": { "type": "string", "enum": ["meeting", "block", "personal", "other"] },
+        "title": { "type": "string", "nullable": true },
+        "notes": { "type": "string", "nullable": true },
+        "location_text": { "type": "string", "nullable": true },
+        "starts_at": { "type": "string", "format": "date-time" },
+        "ends_at": { "type": "string", "format": "date-time" },
+        "all_day": { "type": "boolean", "nullable": true },
+        "status": { "type": "string" },
+        "series_id": { "type": "string", "format": "uuid", "nullable": true },
+        "assignees": {
+          "type": "array",
+          "description": "Per-assignee join rows including invitation response.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "user_id": { "type": "string", "format": "uuid" },
+              "response": { "type": "string", "nullable": true }
+            },
+            "required": ["user_id"]
+          }
+        }
+      },
+      "required": ["id", "kind", "starts_at", "ends_at", "status"]
+    },
+    "CalendarHoldItem": {
+      "type": "object",
+      "description": "A pending booking hold as returned in the calendar grid items payload (owner/office only).",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "guest_name": { "type": "string", "nullable": true },
+        "guest_email": { "type": "string", "nullable": true },
+        "guest_phone": { "type": "string", "nullable": true },
+        "requested_start": { "type": "string", "format": "date-time" },
+        "requested_end": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time", "nullable": true },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "released", "expired"] },
+        "service_id": { "type": "string", "format": "uuid", "nullable": true }
+      },
+      "required": ["id", "requested_start", "requested_end", "status"]
+    },
+    "CalendarHold": {
+      "type": "object",
+      "description": "A booking hold row from the holds inbox listing.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "guest_name": { "type": "string", "nullable": true },
+        "guest_email": { "type": "string", "nullable": true },
+        "guest_phone": { "type": "string", "nullable": true },
+        "requested_start": { "type": "string", "format": "date-time" },
+        "requested_end": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time", "nullable": true },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "released", "expired"] },
+        "service_id": { "type": "string", "format": "uuid", "nullable": true },
+        "released_reason": {
+          "type": "string",
+          "enum": ["admin_decline", "customer_cancel", "other"],
+          "nullable": true
+        },
+        "resolved_to_job_id": { "type": "string", "format": "uuid", "nullable": true },
+        "note": { "type": "string", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "requested_start", "requested_end", "status", "created_at"]
+    },
+    "CalendarJobRow": {
+      "type": "object",
+      "description": "The updated jobs row returned by reschedule. Fields below are confirmed columns; the row carries the full jobs row and may include additional columns.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "title": { "type": "string", "nullable": true },
+        "status": {
+          "type": "string",
+          "enum": ["unscheduled", "scheduled", "done", "cancelled"]
+        },
+        "scheduled_start": { "type": "string", "format": "date-time", "nullable": true },
+        "scheduled_end": { "type": "string", "format": "date-time", "nullable": true },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true }
+      },
+      "additionalProperties": true
+    }
+  }
+}

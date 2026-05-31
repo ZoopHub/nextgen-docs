@@ -1,0 +1,678 @@
+{
+  "tag": {
+    "name": "Jobs",
+    "description": "Jobs, media, crew assignment, completion, and creation from quotes/estimates."
+  },
+  "paths": {
+    "/jobs": {
+      "get": {
+        "tags": ["Jobs"],
+        "operationId": "listJobs",
+        "summary": "List jobs",
+        "description": "**Required scope:** `read:jobs`\n\nList and filter jobs for the tenant. Supports filtering by status, customer, series, a scheduled-start date window (`from`/`to`), and a free-text title search (`q`). Results are page-numbered (20 per page), ordered by `scheduled_start` ascending (nulls last) then `created_at` descending.\n\nNote: this list uses page-number pagination (`page` query param) and returns `{ data, count, page, limit }` — it does not use the cursor/`next_cursor` envelope used elsewhere in the API.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by job status.",
+            "schema": { "type": "string", "enum": ["unscheduled", "scheduled", "done", "cancelled"] }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by customer id.",
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "series_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by recurring-series id.",
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Lower bound (inclusive) on `scheduled_start`, RFC 3339 date-time.",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Upper bound (inclusive) on `scheduled_start`, RFC 3339 date-time.",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Free-text, case-insensitive substring match on the job title.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. 20 items per page.",
+            "schema": { "type": "integer", "minimum": 1, "default": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of jobs.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobList" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Jobs"],
+        "operationId": "createJob",
+        "summary": "Create a job",
+        "description": "**Required scope:** `write:jobs`\n\nCreate a one-time job. If `scheduled_start` is supplied the job is created with status `scheduled`, otherwise `unscheduled`. Line items and crew assignments are created atomically (a failure rolls the job back). Every id in `assigned_user_ids` must belong to a member of this tenant, otherwise the request fails with 400.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JobCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created job row.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Job" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/jobs/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "The job id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Jobs"],
+        "operationId": "getJob",
+        "summary": "Get a job",
+        "description": "**Required scope:** `read:jobs`\n\nFetch a single job with its line items, crew assignments, an inline preview of up to 50 media items, and a thin customer summary. A non-UUID `id` returns 404 without touching the database. Use `GET /jobs/{id}/media` for the authoritative, signed-URL media list.",
+        "responses": {
+          "200": {
+            "description": "The job with its related line items, assignments, media preview, and customer summary.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobWithRelations" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Jobs"],
+        "operationId": "updateJob",
+        "summary": "Update a job",
+        "description": "**Required scope:** `write:jobs`\n\nPartially update a job. Any omitted field is left unchanged. Setting `status` to `done` stamps `completed_at`; setting it to any other value clears `completed_at`. When `line_items` or `assigned_user_ids` are supplied they fully replace the existing rows.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JobUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated job row.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Job" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Jobs"],
+        "operationId": "deleteJob",
+        "summary": "Delete a job",
+        "description": "**Required scope:** `write:jobs`\n\nDelete a job. Only jobs in status `unscheduled` or `cancelled` can be deleted; deleting a `scheduled` or `done` job returns 409.",
+        "responses": {
+          "204": { "description": "The job was deleted." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/jobs/from-estimate/{estimateId}": {
+      "parameters": [
+        {
+          "name": "estimateId",
+          "in": "path",
+          "required": true,
+          "description": "The source quote id. Named `estimateId` for backwards compatibility — quote and estimate ids are interchangeable for records that predate the rename.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Jobs"],
+        "operationId": "createJobFromEstimate",
+        "summary": "Create a job from a quote (deprecated estimate URL)",
+        "description": "**Required scope:** `write:jobs`\n\n**Deprecated.** This is the legacy `from-estimate` URL retained during the rename of estimates to quotes; it forwards the request body verbatim to the quote-conversion handler and is scheduled for removal. Prefer the quote-conversion endpoint.\n\nConverts a quote into work. With no `recurrence`, creates a single job (status `scheduled` when `scheduled_start` is supplied, otherwise `unscheduled`) and returns the job row. With `recurrence`, creates a recurring `job_series`, materializes the first window, and returns a series summary. Line items are copied from the quote. `scheduled_start` and `recurrence` are mutually exclusive. Every id in `assigned_user_ids` must be a member of this tenant.",
+        "deprecated": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JobFromEstimate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Either the created one-time job, or a recurring-series summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/Job" },
+                    { "$ref": "#/components/schemas/JobSeriesCreateResult" }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/jobs/{id}/assign-crew": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "The job id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Jobs"],
+        "operationId": "assignCrewToJob",
+        "summary": "Assign a crew to a job",
+        "description": "**Required scope:** `write:jobs`\n\n**Role restriction:** caller must have the `owner` or `office` role; `tech` callers receive 403.\n\nAssigns every member of a crew to the job as individual assignments, deduping against any pre-existing assignments. Returns the inserted-vs-member counts so the caller can distinguish \"newly added\" from \"already assigned\". A non-UUID `id` returns 404; a crew belonging to another tenant returns 400.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JobCrewAssignment" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Crew fan-out result.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobCrewAssignmentResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/jobs/{id}/done": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "The job id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Jobs"],
+        "operationId": "completeJob",
+        "summary": "Mark a job as complete",
+        "description": "**Required scope:** `write:jobs`\n\nTransition a job from `scheduled` or `unscheduled` to `done`, stamping `completed_at`. Idempotent: completing an already-`done` job returns 200 with the original row and never overwrites the original `completed_at`. A job in any other state returns 409 (`invalid_state_transition`). This request takes no body.",
+        "responses": {
+          "200": {
+            "description": "The completed job row (or, idempotently, the already-completed row).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Job" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/jobs/{id}/media": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "The job id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Jobs"],
+        "operationId": "uploadJobMedia",
+        "summary": "Upload job media",
+        "description": "**Required scope:** `write:jobs`\n\nUpload a single photo or video attachment to a job as `multipart/form-data`. The file is size-capped at 50 MB and restricted to an image/short-video MIME allowlist (`image/jpeg`, `image/png`, `image/webp`, `image/gif`, `image/heic`, `image/heif`, `video/mp4`, `video/quicktime`). The declared `kind` must agree with the file's top-level MIME type (`photo`→image, `video`→video) or the request fails with 400. A rejected upload returns 400, 413, or 415 depending on the reason. The response includes a 1-hour signed URL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/JobMediaUpload" },
+              "encoding": {
+                "file": { "contentType": "image/jpeg, image/png, image/webp, image/gif, image/heic, image/heif, video/mp4, video/quicktime" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The recorded media row, including a temporary signed URL.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobMedia" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/jobs/{id}/media/{mediaId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "The job id.",
+          "schema": { "type": "string", "format": "uuid" }
+        },
+        {
+          "name": "mediaId",
+          "in": "path",
+          "required": true,
+          "description": "The media item id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "delete": {
+        "tags": ["Jobs"],
+        "operationId": "deleteJobMedia",
+        "summary": "Delete a job media item",
+        "description": "**Required scope:** `write:jobs`\n\nDelete a single media item attached to a job. Removes both the database row and the stored object. Returns 404 if the media item does not belong to the given job within this tenant.",
+        "responses": {
+          "204": { "description": "The media item was deleted." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "JobStatus": {
+      "type": "string",
+      "enum": ["unscheduled", "scheduled", "done", "cancelled"],
+      "description": "Lifecycle status of a job."
+    },
+    "JobLineItem": {
+      "type": "object",
+      "description": "A billable line on a job.",
+      "required": ["description", "unit_price", "quantity"],
+      "properties": {
+        "catalog_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Linked pricebook/catalog item, or null for a custom line."
+        },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "unit_price": { "type": "number", "minimum": 0 },
+        "quantity": { "type": "number", "exclusiveMinimum": 0 },
+        "sort_order": { "type": "integer", "minimum": 0, "description": "Display order; defaults to array index when omitted." }
+      }
+    },
+    "JobAssignment": {
+      "type": "object",
+      "description": "A single crew-member assignment on a job.",
+      "required": ["user_id"],
+      "properties": {
+        "user_id": { "type": "string", "format": "uuid" },
+        "assigned_by": { "type": "string", "format": "uuid", "nullable": true },
+        "assigned_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Job": {
+      "type": "object",
+      "description": "A persisted job row.",
+      "required": [
+        "id", "tenant_id", "customer_id", "series_id", "quote_id",
+        "title", "description", "flat_price", "status",
+        "scheduled_start", "scheduled_end", "completed_at",
+        "created_by", "created_at", "updated_at"
+      ],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "series_id": { "type": "string", "format": "uuid", "nullable": true, "description": "Owning recurring series, if this job was materialized from one." },
+        "quote_id": { "type": "string", "format": "uuid", "nullable": true, "description": "Source quote this job was created from, if any." },
+        "title": { "type": "string" },
+        "description": { "type": "string", "nullable": true },
+        "flat_price": { "type": "number", "nullable": true, "description": "Optional flat price overriding line-item totals." },
+        "status": { "$ref": "#/components/schemas/JobStatus" },
+        "scheduled_start": { "type": "string", "format": "date-time", "nullable": true },
+        "scheduled_end": { "type": "string", "format": "date-time", "nullable": true },
+        "completed_at": { "type": "string", "format": "date-time", "nullable": true },
+        "created_by": { "type": "string", "format": "uuid", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "JobWithRelations": {
+      "allOf": [
+        { "$ref": "#/components/schemas/Job" },
+        {
+          "type": "object",
+          "description": "A job joined with its line items, crew assignments, an inline media preview (max 50), and a thin customer summary.",
+          "properties": {
+            "job_line_items": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/JobLineItem" }
+            },
+            "job_assignments": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/JobAssignment" }
+            },
+            "job_media": {
+              "type": "array",
+              "description": "Inline preview of up to 50 media items. Use GET /jobs/{id}/media for the full, signed list.",
+              "items": { "$ref": "#/components/schemas/JobMedia" }
+            },
+            "customer": {
+              "type": "object",
+              "nullable": true,
+              "description": "Thin customer summary for detail views.",
+              "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "display_name": { "type": "string" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "JobListItem": {
+      "type": "object",
+      "description": "A job as projected into the list response. A subset of the full job columns, plus thin customer and assignment joins.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "title": { "type": "string" },
+        "status": { "$ref": "#/components/schemas/JobStatus" },
+        "scheduled_start": { "type": "string", "format": "date-time", "nullable": true },
+        "scheduled_end": { "type": "string", "format": "date-time", "nullable": true },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "series_id": { "type": "string", "format": "uuid", "nullable": true },
+        "flat_price": { "type": "number", "nullable": true },
+        "customer": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "display_name": { "type": "string" }
+          }
+        },
+        "assignments": {
+          "type": "array",
+          "description": "Crew assignments, projected to just the assigned user ids.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "user_id": { "type": "string", "format": "uuid" }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "JobList": {
+      "type": "object",
+      "description": "A page-numbered list of jobs.",
+      "required": ["data", "count", "page", "limit"],
+      "properties": {
+        "data": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/JobListItem" }
+        },
+        "count": { "type": "integer", "description": "Total number of jobs matching the filters (across all pages)." },
+        "page": { "type": "integer", "description": "The 1-based page number returned." },
+        "limit": { "type": "integer", "description": "Page size (fixed at 20)." }
+      }
+    },
+    "JobCreate": {
+      "type": "object",
+      "description": "Body for creating a one-time job.",
+      "required": ["title"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "description": { "type": "string", "maxLength": 5000 },
+        "flat_price": { "type": "number", "minimum": 0, "nullable": true },
+        "scheduled_start": { "type": "string", "format": "date-time", "nullable": true, "description": "When set, the job is created with status `scheduled`." },
+        "scheduled_end": { "type": "string", "format": "date-time", "nullable": true },
+        "line_items": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/components/schemas/JobLineItem" }
+        },
+        "assigned_user_ids": {
+          "type": "array",
+          "default": [],
+          "description": "User ids to assign; each must be a member of this tenant.",
+          "items": { "type": "string", "format": "uuid" }
+        }
+      }
+    },
+    "JobUpdate": {
+      "type": "object",
+      "description": "Body for partially updating a job. All fields optional; omitted fields are unchanged.",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "description": { "type": "string", "maxLength": 5000, "nullable": true },
+        "flat_price": { "type": "number", "minimum": 0, "nullable": true },
+        "status": { "$ref": "#/components/schemas/JobStatus" },
+        "scheduled_start": { "type": "string", "format": "date-time", "nullable": true },
+        "scheduled_end": { "type": "string", "format": "date-time", "nullable": true },
+        "line_items": {
+          "type": "array",
+          "description": "When supplied, fully replaces the job's line items.",
+          "items": { "$ref": "#/components/schemas/JobLineItem" }
+        },
+        "assigned_user_ids": {
+          "type": "array",
+          "description": "When supplied, fully replaces the job's crew assignments.",
+          "items": { "type": "string", "format": "uuid" }
+        }
+      }
+    },
+    "JobRecurrence": {
+      "type": "object",
+      "description": "Recurring-series parameters. When present on a conversion, a recurring series is created instead of a single job.",
+      "required": ["rrule", "dtstart", "timezone"],
+      "properties": {
+        "rrule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "An RFC 5545 RRULE. FREQ must be one of DAILY, WEEKLY, MONTHLY, YEARLY (sub-daily is rejected); BYHOUR/BYMINUTE/BYSECOND are forbidden; COUNT (if present) must be 1..366; UNTIL (if present) must be within 1825 days of now."
+        },
+        "dtstart": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Series start date, YYYY-MM-DD.",
+          "example": "2026-06-01"
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "An IANA timezone name accepted by Intl.DateTimeFormat.",
+          "example": "America/New_York"
+        },
+        "ends_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "nullable": true,
+          "description": "Optional series end date, YYYY-MM-DD."
+        },
+        "max_occurrences": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 366,
+          "nullable": true,
+          "description": "Optional cap on the number of materialized occurrences."
+        }
+      }
+    },
+    "JobFromEstimate": {
+      "type": "object",
+      "description": "Body for converting a quote into a job (or recurring series). `scheduled_start` and `recurrence` are mutually exclusive.",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Overrides the quote title on the created job/series." },
+        "scheduled_start": { "type": "string", "format": "date-time", "nullable": true, "description": "When set (one-time only), the job is created with status `scheduled`." },
+        "scheduled_end": { "type": "string", "format": "date-time", "nullable": true },
+        "assigned_user_ids": {
+          "type": "array",
+          "default": [],
+          "description": "User ids to assign; each must be a member of this tenant.",
+          "items": { "type": "string", "format": "uuid" }
+        },
+        "recurrence": { "$ref": "#/components/schemas/JobRecurrence" }
+      }
+    },
+    "JobSeriesCreateResult": {
+      "type": "object",
+      "description": "Result returned when a quote conversion creates a recurring series.",
+      "required": ["kind", "series_id", "first_job_id"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["series"] },
+        "series_id": { "type": "string", "format": "uuid" },
+        "first_job_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Id of the first materialized job instance, or null if none was materialized."
+        }
+      }
+    },
+    "JobCrewAssignment": {
+      "type": "object",
+      "description": "Body for assigning a crew to a job.",
+      "required": ["crew_id"],
+      "properties": {
+        "crew_id": { "type": "string", "format": "uuid", "description": "The crew whose members will be assigned to the job." }
+      }
+    },
+    "JobCrewAssignmentResult": {
+      "type": "object",
+      "description": "Result of a crew fan-out.",
+      "properties": {
+        "inserted_count": { "type": "integer", "description": "Number of new assignment rows created (existing assignments are skipped)." },
+        "member_count": { "type": "integer", "description": "Total number of members in the crew." },
+        "job_id": { "type": "string", "format": "uuid" },
+        "crew_id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "JobMedia": {
+      "type": "object",
+      "description": "A media item attached to a job.",
+      "required": ["id", "job_id", "storage_path", "kind", "filename", "uploaded_at"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "job_id": { "type": "string", "format": "uuid" },
+        "storage_path": { "type": "string", "description": "Object storage path within the job-media bucket." },
+        "kind": { "type": "string", "enum": ["photo", "video"] },
+        "filename": { "type": "string", "description": "Sanitized original filename." },
+        "size_bytes": { "type": "integer", "nullable": true },
+        "caption": { "type": "string", "nullable": true, "maxLength": 500 },
+        "uploaded_by": { "type": "string", "format": "uuid", "nullable": true },
+        "uploaded_at": { "type": "string", "format": "date-time" },
+        "signed_url": {
+          "type": "string",
+          "nullable": true,
+          "description": "Temporary signed URL (valid ~1 hour), returned on upload. Null when a URL could not be minted."
+        }
+      }
+    },
+    "JobMediaUpload": {
+      "type": "object",
+      "description": "Multipart form for uploading job media.",
+      "required": ["file", "kind"],
+      "properties": {
+        "file": {
+          "type": "string",
+          "format": "binary",
+          "description": "The media file. Max 50 MB; must be an allowed image/short-video MIME type, and must match `kind`."
+        },
+        "kind": { "type": "string", "enum": ["photo", "video"], "description": "Must agree with the file's top-level MIME type." },
+        "caption": { "type": "string", "maxLength": 500 }
+      }
+    }
+  }
+}

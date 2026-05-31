@@ -1,0 +1,306 @@
+{
+  "tag": {
+    "name": "Catalog Categories",
+    "description": "Categories for organizing catalog items."
+  },
+  "paths": {
+    "/catalog-categories": {
+      "get": {
+        "tags": ["Catalog Categories"],
+        "operationId": "listCatalogCategories",
+        "summary": "List catalog categories",
+        "description": "**Required scope:** `read:catalog_categories`\n\nReturns all catalog categories for the tenant, ordered by `sort_order` ascending then `name` ascending. By default the response is a flat array of categories. When `tree=true` is supplied, the response is a nested tree where each category carries a `children` array (categories whose `parent_id` is not present in the result set are placed at the top level).",
+        "parameters": [
+          {
+            "name": "tree",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["true"]
+            },
+            "description": "When set to the literal string `true`, returns a nested tree of CatalogCategoryNode objects instead of a flat array."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A flat list of catalog categories, or a nested tree when `tree=true`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CatalogCategory" }
+                    },
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CatalogCategoryNode" }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Catalog Categories"],
+        "operationId": "createCatalogCategory",
+        "summary": "Create a catalog category",
+        "description": "**Required scope:** `write:catalog_categories`\n\nCreates a new catalog category. Restricted to tenant members with the `owner` role; other roles receive `403 Forbidden`. Returns `409 Conflict` when a category with the same name already exists under the same parent.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CatalogCategoryCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created catalog category.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CatalogCategory" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/catalog-categories/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The unique identifier of the catalog category."
+        }
+      ],
+      "patch": {
+        "tags": ["Catalog Categories"],
+        "operationId": "updateCatalogCategory",
+        "summary": "Update a catalog category",
+        "description": "**Required scope:** `write:catalog_categories`\n\nUpdates an existing catalog category. Restricted to tenant members with the `owner` role; other roles receive `403 Forbidden`. Returns `409 Conflict` if the change would introduce a cycle in the category hierarchy (`category_cycle`), or if a category with the same name already exists under the same parent. Returns `404 Not Found` if the category does not exist for the tenant.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CatalogCategoryUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated catalog category.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CatalogCategory" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Catalog Categories"],
+        "operationId": "deleteCatalogCategory",
+        "summary": "Delete a catalog category",
+        "description": "**Required scope:** `write:catalog_categories`\n\nDeletes a catalog category. Restricted to tenant members with the `owner` role; other roles receive `403 Forbidden`. The deletion is atomic: child categories are re-parented and the category is deleted in a single transaction. Any catalog items referencing the category have their `category_id` cleared automatically. Returns `404 Not Found` if the category does not exist for the tenant.",
+        "responses": {
+          "204": {
+            "description": "The catalog category was deleted successfully."
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "CatalogCategory": {
+      "type": "object",
+      "description": "A category used to organize catalog items.",
+      "required": [
+        "id",
+        "tenant_id",
+        "parent_id",
+        "name",
+        "description",
+        "sort_order",
+        "metadata",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique identifier of the category."
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Identifier of the tenant that owns the category."
+        },
+        "parent_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Identifier of the parent category, or null for a top-level category."
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the category.",
+          "example": "Plumbing"
+        },
+        "description": {
+          "type": "string",
+          "nullable": true,
+          "description": "Optional description of the category."
+        },
+        "sort_order": {
+          "type": "integer",
+          "description": "Ordering position among sibling categories.",
+          "example": 0
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Arbitrary key/value metadata."
+        },
+        "created_by": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Identifier of the user who created the category."
+        },
+        "updated_by": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Identifier of the user who last updated the category."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the category was created."
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the category was last updated."
+        }
+      }
+    },
+    "CatalogCategoryNode": {
+      "allOf": [
+        { "$ref": "#/components/schemas/CatalogCategory" },
+        {
+          "type": "object",
+          "required": ["children"],
+          "properties": {
+            "children": {
+              "type": "array",
+              "description": "Nested child categories. Returned only when listing with `tree=true`.",
+              "items": { "$ref": "#/components/schemas/CatalogCategoryNode" }
+            }
+          }
+        }
+      ],
+      "description": "A catalog category with its nested children, returned when listing with `tree=true`."
+    },
+    "CatalogCategoryCreate": {
+      "type": "object",
+      "description": "Payload for creating a catalog category.",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "description": "Display name of the category.",
+          "example": "Plumbing"
+        },
+        "parent_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Identifier of the parent category, or null for a top-level category."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000,
+          "nullable": true,
+          "description": "Optional description of the category."
+        },
+        "sort_order": {
+          "type": "integer",
+          "default": 0,
+          "description": "Ordering position among sibling categories."
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Arbitrary key/value metadata."
+        }
+      }
+    },
+    "CatalogCategoryUpdate": {
+      "type": "object",
+      "description": "Payload for updating a catalog category. All fields are optional; only provided fields are changed.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "description": "Display name of the category."
+        },
+        "parent_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Identifier of the parent category, or null for a top-level category."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000,
+          "nullable": true,
+          "description": "Optional description of the category."
+        },
+        "sort_order": {
+          "type": "integer",
+          "description": "Ordering position among sibling categories."
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Arbitrary key/value metadata."
+        }
+      }
+    }
+  }
+}

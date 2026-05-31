@@ -1,0 +1,381 @@
+{
+  "tag": {
+    "name": "Notes",
+    "description": "Notes with versioning, attachments, and subject resolution."
+  },
+  "paths": {
+    "/notes": {
+      "get": {
+        "tags": ["Notes"],
+        "operationId": "listNotes",
+        "summary": "List notes",
+        "description": "**Required scope:** `read:notes`\n\nList notes for the tenant. Supports filtering by subject (`subject_type` + `subject_id`, or the `standalone` sentinel for notes with no subject), pinned state, author, agent, and a created-at time window (`since`/`until`). When a free-text query (`q`, max 256 characters) is supplied, results are ranked by full-text + trigram search; in that mode `next_cursor` is always null and `has_more` is the only continuation signal. The `standalone` subject filter cannot be combined with `subject_id` or with `q` (returns 400). Draft notes (photo-first flow) are excluded.",
+        "parameters": [
+          {
+            "name": "subject_type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by subject type. The `standalone` sentinel matches notes with no attached subject (cannot be combined with `subject_id` or `q`).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "customer",
+                "customer_contact",
+                "customer_location",
+                "lawn_estimate",
+                "job",
+                "invoice",
+                "quote",
+                "standalone"
+              ]
+            }
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by the id of the attached subject.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Free-text search query (max 256 characters). Enables ranked search mode.",
+            "schema": { "type": "string", "maxLength": 256 }
+          },
+          {
+            "name": "pinned",
+            "in": "query",
+            "required": false,
+            "description": "Filter by pinned state. Pass `true` or `false`.",
+            "schema": { "type": "boolean" }
+          },
+          {
+            "name": "author",
+            "in": "query",
+            "required": false,
+            "description": "Filter by the id of the user that created the note (`created_by`).",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "required": false,
+            "description": "Filter by the agent that created the note (`created_by_agent`).",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Only include notes created at or after this ISO-8601 datetime (inclusive lower bound).",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Only include notes created strictly before this ISO-8601 datetime (exclusive upper bound).",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          { "$ref": "#/components/parameters/Cursor" },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of notes to return (default 25, min 1, max 100).",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 25 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of notes. Each note is enriched with its signed photo attachments.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Note" }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Opaque cursor for the next page, or null when there are no more results. Always null in search mode (`q` supplied) — use `has_more` instead."
+                    },
+                    "has_more": {
+                      "type": "boolean",
+                      "description": "True when more results exist beyond this page. In search mode this may be true while `next_cursor` is null, signalling truncation (refine the query)."
+                    }
+                  },
+                  "required": ["results", "next_cursor", "has_more"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Notes"],
+        "operationId": "createNote",
+        "summary": "Create a note",
+        "description": "**Required scope:** `write:notes`\n\nCreate a note. A note may be standalone (omit both `subject_type` and `subject_id`) or attached to a subject (supply both). Attaching a subject that does not exist in this tenant returns 404. The body may only be empty when `draft` is true (photo-first flow). Rate-limited per user (shared write bucket across create, update, and version-restore).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NoteCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created note.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Note" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/notes/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Note id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Notes"],
+        "operationId": "getNote",
+        "summary": "Get a note",
+        "description": "**Required scope:** `read:notes`\n\nFetch a single non-deleted note by id.",
+        "responses": {
+          "200": {
+            "description": "The requested note.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Note" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Notes"],
+        "operationId": "updateNote",
+        "summary": "Update a note",
+        "description": "**Required scope:** `write:notes`\n\nUpdate a note's body, pinned state, or attached subject, or commit a draft (`draft: false`). At least one field must be supplied. Subject fields are \"both or neither\": send both `subject_type` and `subject_id` (both non-null to attach, both null to detach). Attaching a subject that does not exist in this tenant returns 404.\n\nOnly the note's author or a tenant owner may update it; other tenant members receive 403. Rate-limited per user (shared write bucket across create, update, and version-restore).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NoteUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated note.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Note" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Notes"],
+        "operationId": "deleteNote",
+        "summary": "Delete a note",
+        "description": "**Required scope:** `write:notes`\n\nSoft-delete a note. Only the note's author or a tenant owner may delete it; other tenant members receive 403.",
+        "responses": {
+          "204": { "description": "The note was soft-deleted. No content." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "NoteSubjectType": {
+      "type": "string",
+      "description": "The kind of entity a note is attached to. `lawn_estimate` is a legacy alias that resolves to a quote.",
+      "enum": [
+        "customer",
+        "customer_contact",
+        "customer_location",
+        "lawn_estimate",
+        "job",
+        "invoice",
+        "quote"
+      ]
+    },
+    "NoteAttachment": {
+      "type": "object",
+      "description": "A signed photo attachment on a note, as embedded in note list/detail rows.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Attachment id." },
+        "position": { "type": "integer", "description": "Slot position within the note (0-5)." },
+        "signed_url": {
+          "type": "string",
+          "nullable": true,
+          "description": "Time-limited signed URL to the stored image, or null when signing failed."
+        },
+        "width": { "type": "integer", "nullable": true, "description": "Image width in pixels, if known." },
+        "height": { "type": "integer", "nullable": true, "description": "Image height in pixels, if known." }
+      },
+      "required": ["id", "position", "signed_url", "width", "height"]
+    },
+    "Note": {
+      "type": "object",
+      "description": "A note. `subject_type` and `subject_id` are either both set (attached note) or both null (standalone note). List responses enrich each note with its `attachments`; the single-note GET returns the bare row without `attachments`.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Note id." },
+        "tenant_id": { "type": "string", "format": "uuid", "description": "Owning tenant id." },
+        "subject_type": {
+          "nullable": true,
+          "description": "The kind of attached subject, or null for a standalone note.",
+          "allOf": [{ "$ref": "#/components/schemas/NoteSubjectType" }]
+        },
+        "subject_id": {
+          "type": "string",
+          "nullable": true,
+          "description": "The id of the attached subject, or null for a standalone note."
+        },
+        "body": { "type": "string", "description": "Note body text (may be empty for an uncommitted draft)." },
+        "pinned": { "type": "boolean", "description": "Whether the note is pinned." },
+        "created_by": {
+          "type": "string",
+          "nullable": true,
+          "description": "Id of the user that created the note, or null for legacy/system notes."
+        },
+        "created_by_agent": {
+          "type": "string",
+          "nullable": true,
+          "description": "Identifier of the agent that created the note, if any."
+        },
+        "updated_by": {
+          "type": "string",
+          "nullable": true,
+          "description": "Id of the user that last updated the note, if any."
+        },
+        "updated_by_agent": {
+          "type": "string",
+          "nullable": true,
+          "description": "Identifier of the agent that last updated the note, if any."
+        },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last-update timestamp." },
+        "deleted_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Soft-delete timestamp, or null when live."
+        },
+        "attachments": {
+          "type": "array",
+          "description": "Signed photo attachments. Present (possibly empty) on list responses; absent on the single-note GET.",
+          "items": { "$ref": "#/components/schemas/NoteAttachment" }
+        }
+      },
+      "required": [
+        "id",
+        "tenant_id",
+        "subject_type",
+        "subject_id",
+        "body",
+        "pinned",
+        "created_by",
+        "created_by_agent",
+        "updated_by",
+        "updated_by_agent",
+        "created_at",
+        "updated_at",
+        "deleted_at"
+      ]
+    },
+    "NoteCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to create a note. Supply both `subject_type` and `subject_id` to attach to a subject, or omit both for a standalone note. The body may only be empty when `draft` is true.",
+      "properties": {
+        "subject_type": { "$ref": "#/components/schemas/NoteSubjectType" },
+        "subject_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id of the subject to attach. Required if `subject_type` is set."
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 100000,
+          "description": "Note body text. Must be non-empty unless `draft` is true."
+        },
+        "pinned": { "type": "boolean", "default": false, "description": "Whether to pin the note." },
+        "draft": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mark as a photo-first draft (allows an empty body). Drafts are excluded from list/search and reaped after 24h if not committed."
+        }
+      },
+      "required": ["body"]
+    },
+    "NoteUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to update a note. At least one field must be supplied. Subject fields are \"both or neither\" when present: both non-null to attach, both null to detach.",
+      "properties": {
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000,
+          "description": "New note body text."
+        },
+        "pinned": { "type": "boolean", "description": "New pinned state." },
+        "draft": {
+          "type": "boolean",
+          "enum": [false],
+          "description": "Commit an in-progress draft. Only `false` is accepted."
+        },
+        "subject_type": {
+          "nullable": true,
+          "description": "New subject type to attach, or null to detach. Must be sent together with `subject_id`.",
+          "allOf": [{ "$ref": "#/components/schemas/NoteSubjectType" }]
+        },
+        "subject_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "New subject id to attach, or null to detach. Must be sent together with `subject_type`."
+        }
+      }
+    }
+  }
+}

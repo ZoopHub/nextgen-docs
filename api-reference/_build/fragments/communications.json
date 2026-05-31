@@ -1,0 +1,529 @@
+{
+  "tag": {
+    "name": "Communications",
+    "description": "Send email/SMS and manage inbound message association."
+  },
+  "paths": {
+    "/communications/email": {
+      "post": {
+        "tags": ["Communications"],
+        "operationId": "sendCommunicationEmail",
+        "summary": "Send an email",
+        "description": "**Required scope:** `write:communications`\n\nSend an email to a customer on behalf of the tenant via the configured email provider (Resend). The recipient is resolved from the customer's contacts: if `contact_id` is supplied that contact is used, otherwise the customer's primary contact is used; the resolved contact must have an email address (409 if it does not). Sends are deduplicated by `idempotency_key` (scoped to outbound email): a repeat call with a previously-seen key returns the existing communication with HTTP 200 instead of creating a new one. `subject_type` and `subject_id` must be supplied together or omitted together.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CommunicationEmailSend" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The email was accepted and a new outbound communication row was created (status `queued`/`sending`).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Communication" }
+              }
+            }
+          },
+          "200": {
+            "description": "Duplicate request — a communication with the same `idempotency_key` already existed; the existing communication is returned unchanged.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Communication" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/communications/sms": {
+      "post": {
+        "tags": ["Communications"],
+        "operationId": "sendCommunicationSms",
+        "summary": "Send an SMS",
+        "description": "**Required scope:** `write:communications`\n\nSend an SMS to a customer on behalf of the tenant via the configured SMS provider (Twilio). The recipient is resolved from the customer's contacts: if `contact_id` is supplied that contact is used, otherwise the customer's primary contact is used. The resolved contact must have a phone number (409 if it does not) and must be SMS-enabled — a contact opted out of SMS (`phone_can_sms` false) yields 409. Sends are deduplicated by `idempotency_key` (scoped to outbound SMS): a repeat call with a previously-seen key returns the existing communication with HTTP 200 instead of creating a new one. `subject_type` and `subject_id` must be supplied together or omitted together.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CommunicationSmsSend" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The SMS was accepted and a new outbound communication row was created (status `queued`/`sending`).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Communication" }
+              }
+            }
+          },
+          "200": {
+            "description": "Duplicate request — a communication with the same `idempotency_key` already existed; the existing communication is returned unchanged.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Communication" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/communications/unknown-inbound": {
+      "get": {
+        "tags": ["Communications"],
+        "operationId": "listUnknownInboundCommunications",
+        "summary": "List unassociated inbound communications",
+        "description": "**Required scope:** `read:communications`\n\nList inbound communications that have not yet been linked to a customer (`direction` is `inbound` and `customer_id` is null), most recent first. Use these to triage messages that could not be auto-correlated to a customer, then attach them with the associate-customer endpoint. Pagination is keyed on `created_at`: pass the previous page's `next_cursor` as `cursor` to fetch older rows.",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Only include communications created at or after this ISO-8601 datetime (inclusive lower bound).",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Pagination cursor — the `created_at` value (ISO-8601 datetime) of the last row from the previous page; returns rows created strictly before it. Taken from the previous response's `next_cursor`.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of communications to return (default 50, min 1, max 100).",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of unassociated inbound communications.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Communication" }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "The `created_at` of the last row in this page, to be passed as `cursor` for the next page; null when there are no more results."
+                    }
+                  },
+                  "required": ["results", "next_cursor"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/communications/{id}/associate-customer": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Communication id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "patch": {
+        "tags": ["Communications"],
+        "operationId": "associateCommunicationCustomer",
+        "summary": "Associate a communication with a customer",
+        "description": "**Required scope:** `write:communications`\n\nLink a communication (typically an unassociated inbound message) to a customer, optionally also setting a contact. The target customer must exist in this tenant and not be soft-deleted (404 otherwise). The communication must exist in this tenant (404 otherwise). Passing no `contact_id` clears any existing contact association.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CommunicationAssociateCustomer" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated communication, now linked to the customer.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Communication" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "CommunicationSubjectType": {
+      "type": "string",
+      "description": "The kind of business entity a communication relates to.",
+      "enum": [
+        "job",
+        "invoice",
+        "quote",
+        "payment",
+        "lead",
+        "maintenance_reminder",
+        "review_prompt",
+        "general"
+      ]
+    },
+    "CommunicationChannel": {
+      "type": "string",
+      "description": "The channel the communication was sent or received on.",
+      "enum": ["sms", "email", "call", "ai_session", "in_app", "note_to_self"]
+    },
+    "CommunicationDirection": {
+      "type": "string",
+      "description": "Direction of the communication relative to the tenant.",
+      "enum": ["inbound", "outbound", "internal"]
+    },
+    "CommunicationStatus": {
+      "type": "string",
+      "description": "Delivery/lifecycle status of the communication.",
+      "enum": ["queued", "sending", "delivered", "failed", "received", "read"]
+    },
+    "CommunicationProvider": {
+      "type": "string",
+      "description": "The provider that handled the communication.",
+      "enum": ["twilio", "resend", "manual", "ai_internal"]
+    },
+    "CommunicationDmarcStatus": {
+      "type": "string",
+      "description": "Gateway-reported DMARC verdict for inbound email; null for non-email rows or older payloads without a verdict.",
+      "enum": ["pass", "fail", "neutral", "none"]
+    },
+    "CommunicationAttachment": {
+      "type": "object",
+      "description": "A file attachment on a communication.",
+      "properties": {
+        "storage_path": { "type": "string", "description": "Path of the stored file in object storage." },
+        "file_name": { "type": "string", "description": "Display file name." },
+        "mime_type": { "type": "string", "description": "MIME type of the file." }
+      },
+      "required": ["storage_path", "file_name", "mime_type"]
+    },
+    "Communication": {
+      "type": "object",
+      "description": "A communication record (a single email, SMS, call, or other message) belonging to the tenant.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Communication id." },
+        "tenant_id": { "type": "string", "format": "uuid", "description": "Owning tenant id." },
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Linked customer id, or null when not yet associated (e.g. an untriaged inbound message)."
+        },
+        "contact_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Linked customer contact id, or null."
+        },
+        "channel": { "$ref": "#/components/schemas/CommunicationChannel" },
+        "direction": { "$ref": "#/components/schemas/CommunicationDirection" },
+        "subject": {
+          "type": "string",
+          "nullable": true,
+          "description": "Message subject line (email); null for channels without a subject."
+        },
+        "body": { "type": "string", "description": "Plain-text message body." },
+        "body_html": {
+          "type": "string",
+          "nullable": true,
+          "description": "HTML message body (email), or null."
+        },
+        "provider": {
+          "nullable": true,
+          "description": "The provider that handled the communication, or null.",
+          "allOf": [{ "$ref": "#/components/schemas/CommunicationProvider" }]
+        },
+        "provider_message_id": {
+          "type": "string",
+          "nullable": true,
+          "description": "Provider-assigned message id (e.g. Twilio SID, Resend id), once sent."
+        },
+        "provider_thread_id": {
+          "type": "string",
+          "nullable": true,
+          "description": "Provider-assigned thread id, if any."
+        },
+        "from_address": {
+          "type": "string",
+          "nullable": true,
+          "description": "Sender address (phone number or email), or null."
+        },
+        "to_address": {
+          "type": "string",
+          "nullable": true,
+          "description": "Recipient address (phone number or email), or null."
+        },
+        "subject_type": {
+          "nullable": true,
+          "description": "The kind of business entity this communication relates to, or null.",
+          "allOf": [{ "$ref": "#/components/schemas/CommunicationSubjectType" }]
+        },
+        "subject_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Id of the related business entity, or null."
+        },
+        "status": { "$ref": "#/components/schemas/CommunicationStatus" },
+        "sent_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "When the message was handed to the provider, or null."
+        },
+        "delivered_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "When the message was confirmed delivered, or null."
+        },
+        "read_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "When the message was read, or null."
+        },
+        "failure_reason": {
+          "type": "string",
+          "nullable": true,
+          "description": "Provider/handler failure detail when status is `failed`, or null."
+        },
+        "ai_session_id": {
+          "type": "string",
+          "nullable": true,
+          "description": "Linked AI session id, if the communication was AI-handled."
+        },
+        "ai_handled": {
+          "type": "boolean",
+          "description": "Whether the communication was handled by the AI assistant."
+        },
+        "escalated_to_human_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "When the communication was escalated to a human, or null."
+        },
+        "escalated_reason": {
+          "type": "string",
+          "nullable": true,
+          "description": "Reason for human escalation, or null."
+        },
+        "attachments": {
+          "type": "array",
+          "description": "File attachments on the communication.",
+          "items": { "$ref": "#/components/schemas/CommunicationAttachment" }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Free-form provider/handler metadata (e.g. the dedup `idempotency_key`)."
+        },
+        "dmarc_status": {
+          "nullable": true,
+          "description": "Gateway DMARC verdict for inbound email rows, or null.",
+          "allOf": [{ "$ref": "#/components/schemas/CommunicationDmarcStatus" }]
+        },
+        "created_by": {
+          "type": "string",
+          "nullable": true,
+          "description": "Id of the user that created the row, or null."
+        },
+        "updated_by": {
+          "type": "string",
+          "nullable": true,
+          "description": "Id of the user that last updated the row, or null."
+        },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last-update timestamp." }
+      },
+      "required": [
+        "id",
+        "tenant_id",
+        "customer_id",
+        "contact_id",
+        "channel",
+        "direction",
+        "subject",
+        "body",
+        "body_html",
+        "provider",
+        "provider_message_id",
+        "provider_thread_id",
+        "from_address",
+        "to_address",
+        "subject_type",
+        "subject_id",
+        "status",
+        "sent_at",
+        "delivered_at",
+        "read_at",
+        "failure_reason",
+        "ai_session_id",
+        "ai_handled",
+        "escalated_to_human_at",
+        "escalated_reason",
+        "attachments",
+        "metadata",
+        "dmarc_status",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "CommunicationEmailSend": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to send an email. `subject_type` and `subject_id` must both be present or both absent.",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id of the customer to email."
+        },
+        "contact_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Specific contact to email. If omitted, the customer's primary contact is used."
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Email subject line."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Plain-text email body."
+        },
+        "body_html": {
+          "type": "string",
+          "description": "Optional HTML email body."
+        },
+        "subject_type": {
+          "description": "The kind of business entity this email relates to. Must be sent together with `subject_id`.",
+          "allOf": [{ "$ref": "#/components/schemas/CommunicationSubjectType" }]
+        },
+        "subject_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id of the related business entity. Must be sent together with `subject_type`."
+        },
+        "attachments": {
+          "type": "array",
+          "description": "Optional file attachments referencing already-uploaded storage objects.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "storage_path": { "type": "string", "description": "Path of the stored file in object storage." },
+              "file_name": { "type": "string", "description": "Display file name for the attachment." }
+            },
+            "required": ["storage_path", "file_name"]
+          }
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Caller-supplied key used to deduplicate sends. Reusing a key returns the existing communication with HTTP 200."
+        }
+      },
+      "required": ["customer_id", "subject", "body", "idempotency_key"]
+    },
+    "CommunicationSmsSend": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to send an SMS. `subject_type` and `subject_id` must both be present or both absent.",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id of the customer to text."
+        },
+        "contact_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Specific contact to text. If omitted, the customer's primary contact is used."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1600,
+          "description": "SMS message body (1-1600 characters)."
+        },
+        "subject_type": {
+          "description": "The kind of business entity this SMS relates to. Must be sent together with `subject_id`.",
+          "allOf": [{ "$ref": "#/components/schemas/CommunicationSubjectType" }]
+        },
+        "subject_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id of the related business entity. Must be sent together with `subject_type`."
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Caller-supplied key used to deduplicate sends. Reusing a key returns the existing communication with HTTP 200."
+        }
+      },
+      "required": ["customer_id", "body", "idempotency_key"]
+    },
+    "CommunicationAssociateCustomer": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to link a communication to a customer (and optionally a contact).",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Id of the customer to associate the communication with."
+        },
+        "contact_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Optional contact to associate. When omitted, any existing contact association is cleared."
+        }
+      },
+      "required": ["customer_id"]
+    }
+  }
+}

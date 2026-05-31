@@ -1,0 +1,267 @@
+{
+  "tag": {
+    "name": "Companies",
+    "description": "Business/company profile and the active/current company."
+  },
+  "paths": {
+    "/companies": {
+      "get": {
+        "tags": ["Companies"],
+        "operationId": "listCompanies",
+        "summary": "List companies the caller belongs to",
+        "description": "**Required scope:** `read:companies`\n\nReturns every company (tenant) the authenticated user is a member of, including the caller's role in each. The caller must be a member of the tenant identified by the URL `{tenantId}` (the active context is validated).",
+        "responses": {
+          "200": {
+            "description": "Array of companies the caller is a member of.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/CompanyWithMembership" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Companies"],
+        "operationId": "createCompany",
+        "summary": "Create a company",
+        "description": "**Required scope:** `write:companies`\n\nCreates a new company (tenant) and makes the authenticated user its owner. A default `company_settings` row is auto-provisioned. The caller must be a member of the tenant identified by the URL `{tenantId}` (the active context is validated).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CompanyCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created company. `slug` and `logo_url` default to null and `plan` defaults to `free`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Company" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "parameters": [
+        {
+          "name": "tenantId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" },
+          "description": "Tenant identifier — either the tenant UUID or its storefront slug. Validated against the caller's memberships."
+        }
+      ]
+    },
+    "/companies/current": {
+      "get": {
+        "tags": ["Companies"],
+        "operationId": "getCurrentCompany",
+        "summary": "Get the current company profile",
+        "description": "**Required scope:** `read:companies`\n\nReturns the company (tenant) identified by the URL `{tenantId}`. The caller must be a member of that tenant.",
+        "responses": {
+          "200": {
+            "description": "The current company profile.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Company" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Companies"],
+        "operationId": "updateCurrentCompany",
+        "summary": "Update the current company profile",
+        "description": "**Required scope:** `write:companies`\n\nUpdates the company (tenant) identified by the URL `{tenantId}`. **Owner role required** — non-owner members receive 403. A partial update: every field is optional but at least one of `name`, `slug`, or `published` must be supplied. `slug` is normalized to lowercase and validated against the storefront slug shape and reserved-slug denylist. `published: true` marks the storefront live; `false` takes it offline.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CompanyUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated company (subset of fields).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompanyUpdateResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "parameters": [
+        {
+          "name": "tenantId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" },
+          "description": "Tenant identifier — either the tenant UUID or its storefront slug. Validated against the caller's memberships."
+        }
+      ]
+    }
+  },
+  "schemas": {
+    "Company": {
+      "type": "object",
+      "description": "A company (tenant) profile.",
+      "required": ["id", "name", "slug", "logo_url", "plan", "created_at", "updated_at"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique tenant identifier.",
+          "example": "8f3c2b1a-4d5e-6f70-8a9b-0c1d2e3f4a5b"
+        },
+        "name": {
+          "type": "string",
+          "description": "Company display name.",
+          "example": "Acme Lawn Care"
+        },
+        "slug": {
+          "type": "string",
+          "nullable": true,
+          "description": "Storefront URL handle. Null until a slug is assigned.",
+          "example": "acme-lawn-care"
+        },
+        "logo_url": {
+          "type": "string",
+          "nullable": true,
+          "description": "URL of the company logo. Null when unset.",
+          "example": "https://cdn.zoop.pro/logos/acme.png"
+        },
+        "plan": {
+          "type": "string",
+          "enum": ["free", "pro", "unlimited"],
+          "description": "Subscription plan.",
+          "example": "free"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 creation timestamp."
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 last-update timestamp."
+        }
+      }
+    },
+    "CompanyWithMembership": {
+      "allOf": [
+        { "$ref": "#/components/schemas/Company" },
+        {
+          "type": "object",
+          "required": ["role"],
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": ["owner", "office", "tech"],
+              "description": "The caller's role in this company.",
+              "example": "owner"
+            }
+          }
+        }
+      ]
+    },
+    "CompanyCreate": {
+      "type": "object",
+      "description": "Payload to create a company.",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Company display name (2–100 characters).",
+          "example": "Acme Lawn Care"
+        }
+      }
+    },
+    "CompanyUpdate": {
+      "type": "object",
+      "description": "Partial company update. Every field is optional, but at least one of `name`, `slug`, or `published` must be provided.",
+      "minProperties": 1,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Company display name (2–100 characters, trimmed).",
+          "example": "Acme Lawn Care"
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Storefront URL handle. Normalized to lowercase before validation; must be 3–64 chars of lowercase letters, digits, and hyphens (no leading/trailing hyphen) and must not be a reserved slug.",
+          "example": "acme-lawn-care"
+        },
+        "published": {
+          "type": "boolean",
+          "description": "Storefront publish toggle. `true` marks the storefront live; `false` takes it offline.",
+          "example": true
+        }
+      }
+    },
+    "CompanyUpdateResult": {
+      "type": "object",
+      "description": "Subset of company fields returned after a successful update.",
+      "required": ["id", "name", "slug", "published_at"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique tenant identifier.",
+          "example": "8f3c2b1a-4d5e-6f70-8a9b-0c1d2e3f4a5b"
+        },
+        "name": {
+          "type": "string",
+          "description": "Company display name.",
+          "example": "Acme Lawn Care"
+        },
+        "slug": {
+          "type": "string",
+          "nullable": true,
+          "description": "Storefront URL handle. Null when unset.",
+          "example": "acme-lawn-care"
+        },
+        "published_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Timestamp the storefront was published, or null if unpublished."
+        }
+      }
+    }
+  }
+}

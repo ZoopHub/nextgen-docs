@@ -1,0 +1,510 @@
+{
+  "tag": {
+    "name": "Settings",
+    "description": "Tenant settings, including company settings."
+  },
+  "paths": {
+    "/settings/company": {
+      "get": {
+        "tags": ["Settings"],
+        "operationId": "getCompanySettings",
+        "summary": "Get company settings",
+        "description": "**Required scope:** `read:settings`\n\nReturn the `company_settings` row for the tenant. Uses an upsert-on-read pattern: if no settings row exists yet, a default row is created and returned. Any tenant member (owner, office, or tech) may read.",
+        "responses": {
+          "200": {
+            "description": "The tenant's company settings.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompanySettings" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Settings"],
+        "operationId": "updateCompanySettings",
+        "summary": "Update company settings",
+        "description": "**Required scope:** `write:settings`\n\nPartially update the tenant's company settings. All fields are optional; supply only the fields to change. Upserts: if no settings row exists yet, one is created from the supplied fields. Any tenant member (owner, office, or tech) may write. String fields with display content reject control characters and the characters `<`, `>`, and `\"` with a 400.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CompanySettingsUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated company settings.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CompanySettings" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "CompanySettingsBusinessHoursDay": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Open/close times for a single day of the week.",
+      "properties": {
+        "open": {
+          "type": "string",
+          "pattern": "^\\d{2}:\\d{2}$",
+          "description": "Opening time in 24-hour `HH:MM` format.",
+          "example": "08:00"
+        },
+        "close": {
+          "type": "string",
+          "pattern": "^\\d{2}:\\d{2}$",
+          "description": "Closing time in 24-hour `HH:MM` format.",
+          "example": "17:00"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the business is open on this day."
+        }
+      },
+      "required": ["open", "close", "enabled"]
+    },
+    "CompanySettingsBusinessHours": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Weekly business hours, keyed by day of week.",
+      "properties": {
+        "mon": { "$ref": "#/components/schemas/CompanySettingsBusinessHoursDay" },
+        "tue": { "$ref": "#/components/schemas/CompanySettingsBusinessHoursDay" },
+        "wed": { "$ref": "#/components/schemas/CompanySettingsBusinessHoursDay" },
+        "thu": { "$ref": "#/components/schemas/CompanySettingsBusinessHoursDay" },
+        "fri": { "$ref": "#/components/schemas/CompanySettingsBusinessHoursDay" },
+        "sat": { "$ref": "#/components/schemas/CompanySettingsBusinessHoursDay" },
+        "sun": { "$ref": "#/components/schemas/CompanySettingsBusinessHoursDay" }
+      },
+      "required": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    },
+    "CompanySettingsAiKnowledgeBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Structured knowledge base used by the AI receptionist.",
+      "properties": {
+        "dispatch_fee": {
+          "type": "number",
+          "nullable": true,
+          "description": "Dispatch fee, or null when not set."
+        },
+        "services_offered": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Services the business offers."
+        },
+        "services_not_offered": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Services the business explicitly does not offer."
+        },
+        "service_radius_description": {
+          "type": "string",
+          "description": "Free-text description of the service area/radius."
+        }
+      },
+      "required": [
+        "dispatch_fee",
+        "services_offered",
+        "services_not_offered",
+        "service_radius_description"
+      ]
+    },
+    "CompanySettings": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "A tenant's company settings row. Responses return the full database row via `select()`, so additional columns may be present beyond those documented here.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Settings row id." },
+        "tenant_id": { "type": "string", "format": "uuid", "description": "Owning tenant id." },
+        "trade_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "plumbing",
+              "hvac",
+              "electrical",
+              "landscaping",
+              "cleaning",
+              "roofing",
+              "general",
+              "garage_door",
+              "pest_control",
+              "other"
+            ]
+          },
+          "description": "Trades the business operates in."
+        },
+        "business_phone": { "type": "string", "nullable": true, "description": "Business phone number." },
+        "business_email": { "type": "string", "nullable": true, "description": "Business email address." },
+        "business_website": { "type": "string", "nullable": true, "description": "Business website URL." },
+        "business_address_line1": { "type": "string", "nullable": true, "description": "Street address line 1." },
+        "business_address_city": { "type": "string", "nullable": true, "description": "City." },
+        "business_address_state": { "type": "string", "nullable": true, "description": "Two-letter state code." },
+        "business_address_zip": { "type": "string", "nullable": true, "description": "ZIP/postal code." },
+        "tagline": { "type": "string", "nullable": true, "description": "Business tagline." },
+        "brand_color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Brand color as a 6-digit hex code.",
+          "example": "#1A2B3C"
+        },
+        "service_radius_miles": {
+          "type": "integer",
+          "description": "Service radius in miles."
+        },
+        "service_zip_codes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "ZIP codes the business serves."
+        },
+        "business_hours": { "$ref": "#/components/schemas/CompanySettingsBusinessHours" },
+        "business_hours_tz": {
+          "type": "string",
+          "description": "IANA time zone used to compute business hours (e.g. `America/Los_Angeles`).",
+          "example": "America/Los_Angeles"
+        },
+        "emergency_dispatch_enabled": { "type": "boolean", "description": "Whether emergency dispatch is enabled." },
+        "emergency_dispatch_fee_cents": { "type": "integer", "description": "Emergency dispatch fee in cents." },
+        "after_hours_message": { "type": "string", "description": "Message shown/played after hours." },
+        "default_job_duration_minutes": { "type": "integer", "description": "Default job duration in minutes." },
+        "buffer_between_jobs_minutes": { "type": "integer", "description": "Buffer between jobs in minutes." },
+        "advance_booking_days": { "type": "integer", "description": "How many days in advance bookings are allowed." },
+        "late_reschedule_cutoff_hours": { "type": "integer", "description": "Cutoff (in hours) before which a job may be rescheduled." },
+        "booking_widget_enabled": { "type": "boolean", "description": "Whether the customer booking widget is enabled." },
+        "booking_hold_ttl_hours": { "type": "integer", "description": "How long (in hours) a booking hold is retained." },
+        "booking_default_duration_minutes": { "type": "integer", "description": "Default duration (in minutes) for widget bookings." },
+        "tech_can_create_event_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["meeting", "block", "personal", "other"]
+          },
+          "description": "Calendar event kinds technicians are allowed to create."
+        },
+        "accepted_payment_methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["stripe", "cash", "check", "zelle", "venmo", "cashapp", "other"]
+          },
+          "description": "Payment methods the business accepts."
+        },
+        "zelle_handle": { "type": "string", "nullable": true, "description": "Zelle handle." },
+        "venmo_handle": { "type": "string", "nullable": true, "description": "Venmo handle." },
+        "cashapp_handle": { "type": "string", "nullable": true, "description": "Cash App handle." },
+        "custom_payment_url": { "type": "string", "nullable": true, "description": "Custom payment URL." },
+        "late_payment_reminder_days": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "description": "Days after which late-payment reminders are sent."
+        },
+        "review_prompt_enabled": { "type": "boolean", "description": "Whether review prompts are enabled." },
+        "review_prompt_delay_hours": { "type": "integer", "description": "Delay (in hours) before sending a review prompt." },
+        "review_link_google": { "type": "string", "nullable": true, "description": "Google review link." },
+        "review_link_yelp": { "type": "string", "nullable": true, "description": "Yelp review link." },
+        "review_link_facebook": { "type": "string", "nullable": true, "description": "Facebook review link." },
+        "sms_notifications_enabled": { "type": "boolean", "description": "Whether SMS notifications are enabled." },
+        "email_notifications_enabled": { "type": "boolean", "description": "Whether email notifications are enabled." },
+        "ai_receptionist_enabled": { "type": "boolean", "description": "Whether the AI receptionist is enabled." },
+        "ai_receptionist_intro": { "type": "string", "description": "Intro message used by the AI receptionist." },
+        "ai_knowledge_base": { "$ref": "#/components/schemas/CompanySettingsAiKnowledgeBase" },
+        "maintenance_reminders_enabled": { "type": "boolean", "description": "Whether maintenance reminders are enabled." },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last-update timestamp." }
+      },
+      "required": [
+        "id",
+        "tenant_id",
+        "trade_types",
+        "business_phone",
+        "business_email",
+        "business_website",
+        "business_address_line1",
+        "business_address_city",
+        "business_address_state",
+        "business_address_zip",
+        "tagline",
+        "brand_color",
+        "service_radius_miles",
+        "service_zip_codes",
+        "business_hours",
+        "business_hours_tz",
+        "emergency_dispatch_enabled",
+        "emergency_dispatch_fee_cents",
+        "after_hours_message",
+        "default_job_duration_minutes",
+        "buffer_between_jobs_minutes",
+        "advance_booking_days",
+        "late_reschedule_cutoff_hours",
+        "booking_widget_enabled",
+        "booking_hold_ttl_hours",
+        "booking_default_duration_minutes",
+        "tech_can_create_event_kinds",
+        "accepted_payment_methods",
+        "zelle_handle",
+        "venmo_handle",
+        "cashapp_handle",
+        "custom_payment_url",
+        "late_payment_reminder_days",
+        "review_prompt_enabled",
+        "review_prompt_delay_hours",
+        "review_link_google",
+        "review_link_yelp",
+        "review_link_facebook",
+        "sms_notifications_enabled",
+        "email_notifications_enabled",
+        "ai_receptionist_enabled",
+        "ai_receptionist_intro",
+        "ai_knowledge_base",
+        "maintenance_reminders_enabled",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "CompanySettingsUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to partially update company settings. All fields are optional; supply only the fields to change. Optional string fields accept an empty string, which is coerced to null. Display string fields (address, tagline) reject control characters and `<`, `>`, `\"`.",
+      "properties": {
+        "trade_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "plumbing",
+              "hvac",
+              "electrical",
+              "landscaping",
+              "cleaning",
+              "roofing",
+              "general",
+              "garage_door",
+              "pest_control",
+              "other"
+            ]
+          },
+          "description": "Trades the business operates in."
+        },
+        "business_phone": {
+          "type": "string",
+          "maxLength": 20,
+          "nullable": true,
+          "description": "Business phone number. Empty string is coerced to null."
+        },
+        "business_email": {
+          "type": "string",
+          "format": "email",
+          "nullable": true,
+          "description": "Business email address. Empty string is coerced to null."
+        },
+        "business_website": {
+          "type": "string",
+          "format": "uri",
+          "nullable": true,
+          "description": "Business website URL. Empty string is coerced to null."
+        },
+        "business_address_line1": {
+          "type": "string",
+          "maxLength": 200,
+          "nullable": true,
+          "description": "Street address line 1. Empty string is coerced to null. Rejects control characters and `<`, `>`, `\"`."
+        },
+        "business_address_city": {
+          "type": "string",
+          "maxLength": 100,
+          "nullable": true,
+          "description": "City. Empty string is coerced to null. Rejects control characters and `<`, `>`, `\"`."
+        },
+        "business_address_state": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 2,
+          "nullable": true,
+          "description": "Two-letter state code (exactly 2 characters). Empty string is coerced to null. Rejects control characters and `<`, `>`, `\"`."
+        },
+        "business_address_zip": {
+          "type": "string",
+          "maxLength": 10,
+          "nullable": true,
+          "description": "ZIP/postal code. Empty string is coerced to null. Rejects control characters and `<`, `>`, `\"`."
+        },
+        "tagline": {
+          "type": "string",
+          "maxLength": 255,
+          "nullable": true,
+          "description": "Business tagline. Empty string is coerced to null. Rejects control characters and `<`, `>`, `\"`."
+        },
+        "brand_color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "description": "Brand color as a 6-digit hex code.",
+          "example": "#1A2B3C"
+        },
+        "service_radius_miles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Service radius in miles."
+        },
+        "service_zip_codes": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 10 },
+          "description": "ZIP codes the business serves."
+        },
+        "business_hours": { "$ref": "#/components/schemas/CompanySettingsBusinessHours" },
+        "business_hours_tz": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "IANA time zone for business hours (e.g. `America/Los_Angeles`). Validated against the runtime's supported time zones; invalid zones are rejected with 400.",
+          "example": "America/Los_Angeles"
+        },
+        "emergency_dispatch_enabled": { "type": "boolean", "description": "Whether emergency dispatch is enabled." },
+        "emergency_dispatch_fee_cents": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Emergency dispatch fee in cents."
+        },
+        "after_hours_message": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Message shown/played after hours."
+        },
+        "default_job_duration_minutes": {
+          "type": "integer",
+          "minimum": 15,
+          "maximum": 480,
+          "description": "Default job duration in minutes."
+        },
+        "buffer_between_jobs_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "description": "Buffer between jobs in minutes."
+        },
+        "advance_booking_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365,
+          "description": "How many days in advance bookings are allowed."
+        },
+        "late_reschedule_cutoff_hours": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 72,
+          "description": "Cutoff (in hours) before which a job may be rescheduled."
+        },
+        "booking_widget_enabled": { "type": "boolean", "description": "Whether the customer booking widget is enabled." },
+        "booking_default_duration_minutes": {
+          "type": "integer",
+          "enum": [30, 45, 60, 90, 120],
+          "description": "Default duration (in minutes) for widget bookings. Must be one of 30, 45, 60, 90, or 120."
+        },
+        "booking_hold_ttl_hours": {
+          "type": "integer",
+          "enum": [4, 12, 24, 48, 72],
+          "description": "How long (in hours) a booking hold is retained. Must be one of 4, 12, 24, 48, or 72."
+        },
+        "tech_can_create_event_kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["meeting", "block", "personal", "other"]
+          },
+          "description": "Calendar event kinds technicians are allowed to create."
+        },
+        "accepted_payment_methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["stripe", "cash", "check", "zelle", "venmo", "cashapp", "other"]
+          },
+          "minItems": 1,
+          "description": "Payment methods the business accepts. Must contain at least one method."
+        },
+        "zelle_handle": {
+          "type": "string",
+          "maxLength": 100,
+          "nullable": true,
+          "description": "Zelle handle. Empty string is coerced to null."
+        },
+        "venmo_handle": {
+          "type": "string",
+          "maxLength": 100,
+          "nullable": true,
+          "description": "Venmo handle. Empty string is coerced to null."
+        },
+        "cashapp_handle": {
+          "type": "string",
+          "maxLength": 100,
+          "nullable": true,
+          "description": "Cash App handle. Empty string is coerced to null."
+        },
+        "custom_payment_url": {
+          "type": "string",
+          "format": "uri",
+          "nullable": true,
+          "description": "Custom payment URL. Empty string is coerced to null."
+        },
+        "late_payment_reminder_days": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 90 },
+          "description": "Days after which late-payment reminders are sent."
+        },
+        "review_prompt_enabled": { "type": "boolean", "description": "Whether review prompts are enabled." },
+        "review_prompt_delay_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 168,
+          "description": "Delay (in hours) before sending a review prompt."
+        },
+        "review_link_google": {
+          "type": "string",
+          "format": "uri",
+          "nullable": true,
+          "description": "Google review link. Empty string is coerced to null."
+        },
+        "review_link_yelp": {
+          "type": "string",
+          "format": "uri",
+          "nullable": true,
+          "description": "Yelp review link. Empty string is coerced to null."
+        },
+        "review_link_facebook": {
+          "type": "string",
+          "format": "uri",
+          "nullable": true,
+          "description": "Facebook review link. Empty string is coerced to null."
+        },
+        "sms_notifications_enabled": { "type": "boolean", "description": "Whether SMS notifications are enabled." },
+        "email_notifications_enabled": { "type": "boolean", "description": "Whether email notifications are enabled." },
+        "ai_receptionist_enabled": { "type": "boolean", "description": "Whether the AI receptionist is enabled." },
+        "ai_receptionist_intro": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Intro message used by the AI receptionist."
+        },
+        "ai_knowledge_base": { "$ref": "#/components/schemas/CompanySettingsAiKnowledgeBase" },
+        "maintenance_reminders_enabled": { "type": "boolean", "description": "Whether maintenance reminders are enabled." }
+      }
+    }
+  }
+}

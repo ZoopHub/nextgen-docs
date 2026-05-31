@@ -1,0 +1,454 @@
+{
+  "tag": {
+    "name": "Catalog Items",
+    "description": "Service/product catalog items, images, price history, and bulk import."
+  },
+  "paths": {
+    "/catalog-items": {
+      "get": {
+        "tags": ["Catalog Items"],
+        "operationId": "listCatalogItems",
+        "summary": "List catalog items",
+        "description": "**Required scope:** `read:catalog_items`\n\nList and search the tenant's catalog items. Each item is returned in a role-appropriate shape: only `owner` callers see cost/markup/supplier fields; `office` and `tech` callers receive the public shape with those fields stripped. Bundle items include their joined `components`. Supports filtering by `kind`, `category_id` (optionally expanded to descendant categories via `include_descendants`), active/archived status, free-text search (`q`), and cursor pagination.",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "description": "Filter by catalog item kind.",
+            "schema": {
+              "type": "string",
+              "enum": ["service", "product", "labor", "fee", "bundle", "discount"]
+            }
+          },
+          {
+            "name": "category_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter to items in this category.",
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "include_descendants",
+            "in": "query",
+            "required": false,
+            "description": "When `true` and `category_id` is supplied, also include items in descendant categories.",
+            "schema": { "type": "string", "enum": ["true", "false"] }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "description": "When `true`, return only non-archived items; when `false`, return only archived items. Omit to return both.",
+            "schema": { "type": "string", "enum": ["true", "false"] }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Free-text search query (max 256 characters).",
+            "schema": { "type": "string", "maxLength": 256 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of items to return (default 50, min 1, max 200).",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+          },
+          { "$ref": "#/components/parameters/Cursor" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of catalog items.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "next_cursor"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CatalogItem" }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Opaque cursor for the next page, or null when there are no more results."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Catalog Items"],
+        "operationId": "createCatalogItem",
+        "summary": "Create a catalog item",
+        "description": "**Required scope:** `write:catalog_items`\n\nRestricted to the `owner` role — other roles receive 403. Create a catalog item. The request body is a discriminated union on `kind`; `bundle` items require a non-empty `components` array and `discount` items require `discount_type`. If `category_id` is supplied it must belong to this tenant, otherwise a 422 `invalid_category` error is returned. Returns the created item in the owner shape.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CatalogItemCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created catalog item.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CatalogItem" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": {
+            "description": "The supplied `category_id` does not belong to this tenant (`invalid_category`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/catalog-items/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Catalog item id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Catalog Items"],
+        "operationId": "getCatalogItem",
+        "summary": "Get a catalog item",
+        "description": "**Required scope:** `read:catalog_items`\n\nFetch a single non-archived catalog item in a role-appropriate shape (only `owner` callers see cost/markup/supplier fields). For `bundle` items, each entry in `components` is enriched with the fully serialized referenced catalog `item` (or null if unavailable).",
+        "responses": {
+          "200": {
+            "description": "The catalog item. For bundles, `components` entries carry a nested serialized `item`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CatalogItem" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Catalog Items"],
+        "operationId": "updateCatalogItem",
+        "summary": "Update a catalog item",
+        "description": "**Required scope:** `write:catalog_items`\n\nRestricted to the `owner` role — other roles receive 403. Partially update a catalog item; all fields are optional. If `discount_value` is supplied, `discount_type` must accompany it. For `bundle` items, supplying `components` atomically replaces the bundle's component set. If `category_id` is supplied it must belong to this tenant, otherwise a 422 `invalid_category` error is returned. Returns the updated item in the owner shape.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CatalogItemUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated catalog item.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CatalogItem" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": {
+            "description": "The supplied `category_id` does not belong to this tenant (`invalid_category`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Catalog Items"],
+        "operationId": "deleteCatalogItem",
+        "summary": "Archive a catalog item",
+        "description": "**Required scope:** `write:catalog_items`\n\nRestricted to the `owner` role — other roles receive 403. Soft-deletes (archives) the catalog item. If the item is referenced by one or more active (non-archived) bundles, the request is rejected with a 409 `bundle_component_conflict` and the item is not archived. Returns 204 No Content on success.",
+        "responses": {
+          "204": { "description": "The catalog item was archived. No content is returned." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "CatalogItemBundleComponentInput": {
+      "type": "object",
+      "required": ["catalog_item_id", "default_qty"],
+      "description": "A component line of a bundle catalog item (input shape).",
+      "properties": {
+        "catalog_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The catalog item included in the bundle."
+        },
+        "default_qty": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Default quantity of this component in the bundle (must be positive)."
+        },
+        "sort_order": {
+          "type": "integer",
+          "default": 0,
+          "description": "Display order of the component within the bundle."
+        }
+      }
+    },
+    "CatalogItemBundleComponent": {
+      "type": "object",
+      "required": ["id", "bundle_id", "catalog_item_id", "default_qty", "sort_order", "created_at"],
+      "description": "A persisted bundle component line.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "bundle_id": { "type": "string", "format": "uuid" },
+        "catalog_item_id": { "type": "string", "format": "uuid" },
+        "default_qty": { "type": "number" },
+        "sort_order": { "type": "integer" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "item": {
+          "description": "On the single-item GET response for bundles, the fully serialized referenced catalog item (or null). Absent on list responses.",
+          "nullable": true,
+          "allOf": [{ "$ref": "#/components/schemas/CatalogItem" }]
+        }
+      }
+    },
+    "CatalogItem": {
+      "type": "object",
+      "description": "A catalog item. A discriminated union on `kind`. Cost/markup/supplier fields are only present for `owner`-role callers and only on the kinds that support them. Numeric DB values are coerced to numbers.",
+      "discriminator": { "propertyName": "kind" },
+      "oneOf": [
+        { "$ref": "#/components/schemas/CatalogItemPriced" },
+        { "$ref": "#/components/schemas/CatalogItemBundle" },
+        { "$ref": "#/components/schemas/CatalogItemDiscount" }
+      ]
+    },
+    "CatalogItemBase": {
+      "type": "object",
+      "required": [
+        "id", "tenant_id", "kind", "category_id", "name", "description", "sku",
+        "image_url", "metadata", "created_by", "updated_by", "created_at",
+        "updated_at", "archived_at"
+      ],
+      "description": "Audit + identity fields present on every catalog item kind.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "kind": {
+          "type": "string",
+          "enum": ["service", "product", "labor", "fee", "bundle", "discount"]
+        },
+        "category_id": { "type": "string", "format": "uuid", "nullable": true },
+        "name": { "type": "string" },
+        "description": { "type": "string", "nullable": true },
+        "sku": { "type": "string", "nullable": true },
+        "image_url": { "type": "string", "nullable": true },
+        "metadata": { "type": "object", "additionalProperties": true },
+        "created_by": { "type": "string", "format": "uuid", "nullable": true },
+        "updated_by": { "type": "string", "format": "uuid", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "archived_at": { "type": "string", "format": "date-time", "nullable": true }
+      }
+    },
+    "CatalogItemPriced": {
+      "description": "A priced catalog item (`service`, `product`, `labor`, or `fee`). Owner callers additionally see `cost`, `markup_pct`, `supplier_url`, `supplier_sku`, `last_known_cost`, and `last_synced_at`.",
+      "allOf": [
+        { "$ref": "#/components/schemas/CatalogItemBase" },
+        {
+          "type": "object",
+          "required": ["kind", "unit", "unit_price"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["service", "product", "labor", "fee"] },
+            "unit": { "type": "string", "nullable": true },
+            "unit_price": { "type": "number", "nullable": true },
+            "cost": {
+              "type": "number",
+              "nullable": true,
+              "description": "Owner-only."
+            },
+            "markup_pct": {
+              "type": "number",
+              "nullable": true,
+              "description": "Owner-only. Decimal fraction (e.g. 0.25 = 25%)."
+            },
+            "supplier_url": { "type": "string", "nullable": true, "description": "Owner-only." },
+            "supplier_sku": { "type": "string", "nullable": true, "description": "Owner-only." },
+            "last_known_cost": { "type": "number", "nullable": true, "description": "Owner-only." },
+            "last_synced_at": {
+              "type": "string",
+              "format": "date-time",
+              "nullable": true,
+              "description": "Owner-only."
+            }
+          }
+        }
+      ]
+    },
+    "CatalogItemBundle": {
+      "description": "A bundle catalog item. Owner callers additionally see `markup_pct`, `supplier_url`, and `supplier_sku` (bundles have no `cost`).",
+      "allOf": [
+        { "$ref": "#/components/schemas/CatalogItemBase" },
+        {
+          "type": "object",
+          "required": ["kind", "unit", "unit_price", "flat_package", "components"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["bundle"] },
+            "unit": { "type": "string", "nullable": true },
+            "unit_price": { "type": "number", "nullable": true },
+            "flat_package": { "type": "boolean", "nullable": true },
+            "components": {
+              "type": "array",
+              "description": "Always present (possibly empty) for bundles.",
+              "items": { "$ref": "#/components/schemas/CatalogItemBundleComponent" }
+            },
+            "markup_pct": {
+              "type": "number",
+              "nullable": true,
+              "description": "Owner-only. Decimal fraction."
+            },
+            "supplier_url": { "type": "string", "nullable": true, "description": "Owner-only." },
+            "supplier_sku": { "type": "string", "nullable": true, "description": "Owner-only." }
+          }
+        }
+      ]
+    },
+    "CatalogItemDiscount": {
+      "description": "A discount catalog item. Has no owner-only fields — owners and non-owners see the same shape.",
+      "allOf": [
+        { "$ref": "#/components/schemas/CatalogItemBase" },
+        {
+          "type": "object",
+          "required": ["kind", "discount_type", "discount_value"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["discount"] },
+            "discount_type": { "type": "string", "enum": ["percentage", "flat"] },
+            "discount_value": { "type": "number", "nullable": true }
+          }
+        }
+      ]
+    },
+    "CatalogItemCreate": {
+      "description": "Create payload for a catalog item. A discriminated union on `kind`.",
+      "discriminator": { "propertyName": "kind" },
+      "oneOf": [
+        { "$ref": "#/components/schemas/CatalogItemCreatePriced" },
+        { "$ref": "#/components/schemas/CatalogItemCreateBundle" },
+        { "$ref": "#/components/schemas/CatalogItemCreateDiscount" }
+      ]
+    },
+    "CatalogItemCreatePriced": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "description": "Create payload for a `service`, `product`, `labor`, or `fee` item.",
+      "properties": {
+        "kind": { "type": "string", "enum": ["service", "product", "labor", "fee"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "description": { "type": "string", "maxLength": 2000, "nullable": true },
+        "sku": { "type": "string", "maxLength": 128, "nullable": true },
+        "unit": { "type": "string", "maxLength": 64, "nullable": true },
+        "unit_price": { "type": "number", "minimum": 0, "nullable": true },
+        "category_id": { "type": "string", "format": "uuid", "nullable": true },
+        "cost": { "type": "number", "minimum": 0, "nullable": true },
+        "markup_pct": { "type": "number", "minimum": 0, "nullable": true },
+        "supplier_url": { "type": "string", "format": "uri", "nullable": true },
+        "supplier_sku": { "type": "string", "maxLength": 128, "nullable": true },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "CatalogItemCreateBundle": {
+      "type": "object",
+      "required": ["kind", "name", "components"],
+      "description": "Create payload for a `bundle` item. `cost` is not accepted for bundles.",
+      "properties": {
+        "kind": { "type": "string", "enum": ["bundle"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "description": { "type": "string", "maxLength": 2000, "nullable": true },
+        "sku": { "type": "string", "maxLength": 128, "nullable": true },
+        "unit": { "type": "string", "maxLength": 64, "nullable": true },
+        "unit_price": { "type": "number", "minimum": 0, "nullable": true },
+        "category_id": { "type": "string", "format": "uuid", "nullable": true },
+        "markup_pct": { "type": "number", "minimum": 0, "nullable": true },
+        "supplier_url": { "type": "string", "format": "uri", "nullable": true },
+        "supplier_sku": { "type": "string", "maxLength": 128, "nullable": true },
+        "flat_package": { "type": "boolean" },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/components/schemas/CatalogItemBundleComponentInput" }
+        },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "CatalogItemCreateDiscount": {
+      "type": "object",
+      "required": ["kind", "name", "discount_type"],
+      "description": "Create payload for a `discount` item.",
+      "properties": {
+        "kind": { "type": "string", "enum": ["discount"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "description": { "type": "string", "maxLength": 2000, "nullable": true },
+        "sku": { "type": "string", "maxLength": 128, "nullable": true },
+        "category_id": { "type": "string", "format": "uuid", "nullable": true },
+        "discount_type": { "type": "string", "enum": ["percentage", "flat"] },
+        "discount_value": { "type": "number", "minimum": 0, "nullable": true },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "CatalogItemUpdate": {
+      "type": "object",
+      "description": "Partial update payload for a catalog item. All fields optional. If `discount_value` is provided, `discount_type` must accompany it. Supplying `components` on a bundle atomically replaces its component set.",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "description": { "type": "string", "maxLength": 2000, "nullable": true },
+        "sku": { "type": "string", "maxLength": 128, "nullable": true },
+        "unit": { "type": "string", "maxLength": 64, "nullable": true },
+        "unit_price": { "type": "number", "minimum": 0, "nullable": true },
+        "category_id": { "type": "string", "format": "uuid", "nullable": true },
+        "cost": { "type": "number", "minimum": 0, "nullable": true },
+        "markup_pct": { "type": "number", "minimum": 0, "nullable": true },
+        "supplier_url": { "type": "string", "format": "uri", "nullable": true },
+        "supplier_sku": { "type": "string", "maxLength": 128, "nullable": true },
+        "discount_type": { "type": "string", "enum": ["percentage", "flat"], "nullable": true },
+        "discount_value": { "type": "number", "minimum": 0, "nullable": true },
+        "flat_package": { "type": "boolean", "nullable": true },
+        "components": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/CatalogItemBundleComponentInput" }
+        },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    }
+  }
+}

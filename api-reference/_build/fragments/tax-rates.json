@@ -1,0 +1,266 @@
+{
+  "tag": {
+    "name": "Tax Rates",
+    "description": "Tax rates, including archive/restore."
+  },
+  "paths": {
+    "/tax-rates": {
+      "get": {
+        "tags": ["Tax Rates"],
+        "operationId": "listTaxRates",
+        "summary": "List tax rates",
+        "description": "**Required scope:** `read:tax_rates`\n\nList the tenant's tax rates, newest first. By default only active (non-archived) rates are returned. Pass `include_archived=1` to instead return only archived (inactive) rates. The response also includes the tenant's `default_tax_rate_id`, which points at the single rate used as the default for new invoices (or null when none is set).",
+        "parameters": [
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "description": "When set to `1`, return only archived (inactive) rates instead of active ones. Any other value (or omitting the parameter) returns only active rates.",
+            "schema": { "type": "string", "enum": ["1"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tenant's tax rates and current default rate id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rates": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TaxRate" }
+                    },
+                    "default_tax_rate_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true,
+                      "description": "Id of the tax rate used as the default for new invoices, or null when no default is set."
+                    }
+                  },
+                  "required": ["rates", "default_tax_rate_id"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Tax Rates"],
+        "operationId": "createTaxRate",
+        "summary": "Create a tax rate",
+        "description": "**Required scope:** `write:tax_rates`\n\nCreate a tax rate for the tenant. The rate is entered as a percentage in `rate_percentage` (for example `8.25`) and stored internally as a decimal (`0.0825`). The percentage must be `0 ≤ rate_percentage < 100`. Names must be unique among active rates in the tenant; a collision returns 409. When `is_default` is true, the created rate is also set as the tenant's default for new invoices.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TaxRateCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created tax rate.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TaxRate" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/tax-rates/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Tax rate id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "patch": {
+        "tags": ["Tax Rates"],
+        "operationId": "updateTaxRate",
+        "summary": "Update a tax rate",
+        "description": "**Required scope:** `write:tax_rates`\n\nUpdate a tax rate's name, rate, description, and/or default flag. All fields are optional. Renaming to a name already used by another active rate returns 409. Setting `is_default` to true promotes this rate to the tenant default (rejected with 409 if the rate is archived); setting it to false clears the tenant default only if this rate is currently the default.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TaxRateUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated tax rate.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TaxRate" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Tax Rates"],
+        "operationId": "archiveTaxRate",
+        "summary": "Archive a tax rate",
+        "description": "**Required scope:** `write:tax_rates`\n\nArchive (soft-delete) a tax rate by setting `is_active` to false. If the rate was the tenant's default, the default is also cleared.",
+        "responses": {
+          "204": { "description": "The tax rate was archived. No content." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/tax-rates/{id}/restore": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Tax rate id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Tax Rates"],
+        "operationId": "restoreTaxRate",
+        "summary": "Restore a tax rate",
+        "description": "**Required scope:** `write:settings`\n\nRestore an archived tax rate by setting `is_active` back to true. Active-name uniqueness is enforced by a partial unique index; if restoring would collide with another active rate's name, the request returns 409 (rename the conflicting rate first).",
+        "responses": {
+          "200": {
+            "description": "The restored tax rate.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TaxRate" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "TaxRate": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "A tenant tax rate. The rate is stored as a decimal in `rate_decimal` (for example `0.0825` for 8.25%). Create/update/restore responses return the full database row via `select()`; the list endpoint returns the explicitly selected fields below. Additional columns may be present on the full-row responses.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Tax rate id." },
+        "tenant_id": { "type": "string", "format": "uuid", "description": "Owning tenant id." },
+        "name": { "type": "string", "description": "Display name of the tax rate." },
+        "rate_decimal": {
+          "type": "number",
+          "description": "The tax rate as a decimal fraction (for example `0.0825` for 8.25%). Stored with numeric(7,6) precision."
+        },
+        "description": {
+          "type": "string",
+          "nullable": true,
+          "description": "Optional free-text description, or null."
+        },
+        "is_active": {
+          "type": "boolean",
+          "description": "Whether the rate is active. Archived rates have this set to false."
+        },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last-update timestamp." }
+      },
+      "required": [
+        "id",
+        "tenant_id",
+        "name",
+        "rate_decimal",
+        "description",
+        "is_active",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "TaxRateCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to create a tax rate. The rate is supplied as a percentage and converted to a decimal for storage.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Display name. Must be unique among the tenant's active rates."
+        },
+        "rate_percentage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 99.999999,
+          "description": "The tax rate as a percentage (for example `8.25`). Must be `0 ≤ rate_percentage < 100`.",
+          "example": 8.25
+        },
+        "is_default": {
+          "type": "boolean",
+          "description": "When true, set this rate as the tenant's default for new invoices."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500,
+          "nullable": true,
+          "description": "Optional free-text description."
+        }
+      },
+      "required": ["name", "rate_percentage"]
+    },
+    "TaxRateUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to update a tax rate. All fields are optional; supply only the fields to change.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "New display name. Must not collide with another active rate's name."
+        },
+        "rate_percentage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 99.999999,
+          "description": "New tax rate as a percentage (for example `8.25`). Must be `0 ≤ rate_percentage < 100`.",
+          "example": 8.25
+        },
+        "is_default": {
+          "type": "boolean",
+          "description": "Set true to promote this rate to the tenant default (rejected with 409 if the rate is archived); set false to clear the tenant default if this rate is currently the default."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500,
+          "nullable": true,
+          "description": "New free-text description, or null to clear it."
+        }
+      }
+    }
+  }
+}

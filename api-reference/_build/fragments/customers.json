@@ -1,0 +1,1530 @@
+{
+  "tag": {
+    "name": "Customers",
+    "description": "Manage customers, their contacts, locations, tags, attachments, and billing."
+  },
+  "paths": {
+    "/customers": {
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "listCustomers",
+        "summary": "List customers",
+        "description": "**Required scope:** `read:customers`\n\nList and search customers for the tenant. Supports free-text search (`q`, capped at 256 characters), status/type filters, tag filter, and cursor pagination. The `has_open_balance` and `has_open_jobs` filters are not yet supported and return 400 if supplied. Rate-limited to 60 requests/minute per user.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Free-text search query (max 256 characters).",
+            "schema": { "type": "string", "maxLength": 256 }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by customer status.",
+            "schema": { "type": "string", "enum": ["active", "inactive", "archived"] }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by customer type.",
+            "schema": { "type": "string", "enum": ["individual", "company"] }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "description": "Filter by tag id.",
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          { "$ref": "#/components/parameters/Cursor" },
+          { "$ref": "#/components/parameters/Limit" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of customer search results.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CustomerSearchResult" }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Opaque cursor for the next page, or null when there are no more results."
+                    }
+                  },
+                  "required": ["results", "next_cursor"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "createCustomer",
+        "summary": "Create a customer",
+        "description": "**Required scope:** `write:customers`\n\nCreate an individual or company customer. The request body is a discriminated union on `customer_type`. Returns 409 if a customer with the same phone number already exists.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created customer.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Customer" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "getCustomer",
+        "summary": "Get a customer",
+        "description": "**Required scope:** `read:customers`\n\nFetch a single customer with its live (non-deleted) contacts and locations. If the requested customer was merged into a survivor record, the response is a `{ \"merged_into\": \"<survivor-id>\" }` redirect pointer instead of the full customer object.",
+        "responses": {
+          "200": {
+            "description": "The customer with its contacts and locations, or a merge-redirect pointer.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerWithRelations" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Customers"],
+        "operationId": "updateCustomer",
+        "summary": "Update a customer",
+        "description": "**Required scope:** `write:customers`\n\nUpdate editable customer fields. Lifecycle fields (`status`, `deleted_at`, `archived_at`, `merged_into_customer_id`) are rejected with a 400 `disallowed_fields` error — use the dedicated archive/restore/merge routes instead.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated customer.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Customer" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Customers"],
+        "operationId": "deleteCustomer",
+        "summary": "Archive a customer (soft-delete)",
+        "description": "**Required scope:** `write:customers`\n\nSoft-archives the customer (same lifecycle action as `POST /customers/{id}/archive`). Owner role only.",
+        "responses": {
+          "204": { "description": "Customer archived." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/archive": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "archiveCustomer",
+        "summary": "Archive a customer",
+        "description": "**Required scope:** `write:customers`\n\nSoft-archives (soft-deletes) the customer. Owner role only.",
+        "responses": {
+          "204": { "description": "Customer archived." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/attachments": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "listCustomerAttachments",
+        "summary": "List customer attachments",
+        "description": "**Required scope:** `read:customers`\n\nList all file attachments for the customer, newest first.",
+        "responses": {
+          "200": {
+            "description": "The customer's attachments.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/CustomerAttachment" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "uploadCustomerAttachment",
+        "summary": "Upload a customer attachment",
+        "description": "**Required scope:** `write:customers`\n\nUpload a file attachment via `multipart/form-data`. The upload is validated for size, MIME type, and filename safety before storage. Form fields: `file` (required), `attachment_type` (optional, defaults to `other`), and `label` (optional, defaults to the sanitized filename).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The file to upload."
+                  },
+                  "attachment_type": {
+                    "type": "string",
+                    "description": "Attachment classification. Defaults to `other`.",
+                    "example": "contract"
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Human-readable label. Defaults to the sanitized filename."
+                  }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created attachment record.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerAttachment" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/attachments/{attachmentId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        },
+        {
+          "name": "attachmentId",
+          "in": "path",
+          "required": true,
+          "description": "Attachment id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "getCustomerAttachmentDownloadUrl",
+        "summary": "Get an attachment download URL",
+        "description": "**Required scope:** `read:customers`\n\nReturns a short-lived (5-minute TTL) signed download URL for the attachment.",
+        "responses": {
+          "200": {
+            "description": "A signed download URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "Signed download URL valid for 5 minutes."
+                    }
+                  },
+                  "required": ["url"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Customers"],
+        "operationId": "deleteCustomerAttachment",
+        "summary": "Delete a customer attachment",
+        "description": "**Required scope:** `write:customers`\n\nDeletes the attachment record and its underlying stored object.",
+        "responses": {
+          "204": { "description": "Attachment deleted." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/billing-profile": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "getCustomerBillingProfile",
+        "summary": "Get a customer's billing profile",
+        "description": "**Required scope:** `read:customers`\n\nFetch the customer's billing profile (payment terms, tax settings, billing preferences).",
+        "responses": {
+          "200": {
+            "description": "The billing profile.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerBillingProfile" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "patch": {
+        "tags": ["Customers"],
+        "operationId": "updateCustomerBillingProfile",
+        "summary": "Update a customer's billing profile",
+        "description": "**Required scope:** `write:customers`\n\nUpdate billing-policy fields (payment terms, tax rate/exemption, invoice and reminder preferences, billing contact).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerBillingProfileUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated billing profile.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerBillingProfile" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/contacts": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "listCustomerContacts",
+        "summary": "List customer contacts",
+        "description": "**Required scope:** `read:customers`\n\nList all contacts for the customer.",
+        "responses": {
+          "200": {
+            "description": "The customer's contacts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/CustomerContact" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "addCustomerContact",
+        "summary": "Create a customer contact",
+        "description": "**Required scope:** `write:customers`\n\nCreate a contact for the customer. The phone number, if provided, is normalized to E.164. Returns 409 if attempting to add a second primary contact.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerContactCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created contact.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerContact" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/contacts/{contactId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        },
+        {
+          "name": "contactId",
+          "in": "path",
+          "required": true,
+          "description": "Contact id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "getCustomerContact",
+        "summary": "Get a customer contact",
+        "description": "**Required scope:** `read:customers`\n\nFetch a single contact for the customer.",
+        "responses": {
+          "200": {
+            "description": "The contact.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerContact" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Customers"],
+        "operationId": "updateCustomerContact",
+        "summary": "Update a customer contact",
+        "description": "**Required scope:** `write:customers`\n\nPartially update a contact. Unknown keys are ignored. Mutations are rejected with 404 if the parent customer is archived. Phone numbers are normalized to E.164.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerContactUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated contact.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerContact" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Customers"],
+        "operationId": "deleteCustomerContact",
+        "summary": "Delete a customer contact",
+        "description": "**Required scope:** `write:customers`\n\nArchives (soft-deletes) the contact. Rejected with 404 if the parent customer is archived.",
+        "responses": {
+          "204": { "description": "Contact deleted." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/contacts/{contactId}/promote-to-primary": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        },
+        {
+          "name": "contactId",
+          "in": "path",
+          "required": true,
+          "description": "Contact id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "promoteCustomerContactToPrimary",
+        "summary": "Promote a contact to primary",
+        "description": "**Required scope:** `write:customers`\n\nAtomically demotes the current primary contact and promotes the specified contact to primary. The primary contact's number/email receives SMS and billing communications for the customer.",
+        "responses": {
+          "200": {
+            "description": "The promoted contact.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerContact" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/duplicate-candidates": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "listCustomerDuplicateCandidates",
+        "summary": "Find duplicate candidates",
+        "description": "**Required scope:** `read:customers`\n\nReturns potential duplicate customer records for the given customer, for use in merge workflows.",
+        "responses": {
+          "200": {
+            "description": "Candidate duplicate customers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "description": "Potential duplicate customer records. Exact item shape is determined by findDuplicateCandidates and not fully resolved here.",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "required": ["candidates"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/locations": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "listCustomerLocations",
+        "summary": "List customer service locations",
+        "description": "**Required scope:** `read:customers`\n\nList all service locations for the customer.",
+        "responses": {
+          "200": {
+            "description": "The customer's locations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/CustomerLocation" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "addCustomerLocation",
+        "summary": "Create a customer service location",
+        "description": "**Required scope:** `write:customers`\n\nCreate a service location for the customer. Returns 409 if attempting to add a second primary location.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerLocationCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created location.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerLocation" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/locations/{locationId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        },
+        {
+          "name": "locationId",
+          "in": "path",
+          "required": true,
+          "description": "Location id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "getCustomerLocation",
+        "summary": "Get a customer location",
+        "description": "**Required scope:** `read:customers`\n\nFetch a single service location for the customer.",
+        "responses": {
+          "200": {
+            "description": "The location.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerLocation" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Customers"],
+        "operationId": "updateCustomerLocation",
+        "summary": "Update a customer location",
+        "description": "**Required scope:** `write:customers`\n\nPartially update a service location. Unknown keys are ignored. Mutations are rejected with 404 if the parent customer is archived. Returns 409 when flipping `is_primary` would create a second primary location of the same type.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerLocationUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated location.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CustomerLocation" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Customers"],
+        "operationId": "deleteCustomerLocation",
+        "summary": "Delete a customer location",
+        "description": "**Required scope:** `write:customers`\n\nArchives (soft-deletes) the service location. Rejected with 404 if the parent customer is archived.",
+        "responses": {
+          "204": { "description": "Location deleted." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/portal-token": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "mintCustomerPortalToken",
+        "summary": "Mint a customer portal token",
+        "description": "**Required scope:** `write:customers`\n\nOwner role only. Mints a fresh customer portal token, atomically revoking any prior active token (one active token per customer). The plaintext token and public account URL are returned exactly once and cannot be re-fetched.",
+        "responses": {
+          "201": {
+            "description": "The newly minted portal token (returned once).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string",
+                      "description": "The plaintext portal token. Returned only once."
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "Public account URL containing the token."
+                    },
+                    "created_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When the token row was created."
+                    }
+                  },
+                  "required": ["token", "url", "created_at"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Customers"],
+        "operationId": "revokeCustomerPortalToken",
+        "summary": "Revoke a customer portal token",
+        "description": "**Required scope:** `write:customers`\n\nOwner role only. Revokes the customer's active portal token. No-op (still 204) when no active token exists.",
+        "responses": {
+          "204": { "description": "Token revoked (or no active token to revoke)." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/tags": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "assignCustomerTag",
+        "summary": "Assign a tag to a customer",
+        "description": "**Required scope:** `write:customers`\n\nAssigns a tag to the customer. Idempotent — re-assigning an existing tag is a no-op. Returns 200 with no body on success.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerTagAssign" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Tag assigned (or already assigned)." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/tags/{tagId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        },
+        {
+          "name": "tagId",
+          "in": "path",
+          "required": true,
+          "description": "Tag id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "delete": {
+        "tags": ["Customers"],
+        "operationId": "removeCustomerTag",
+        "summary": "Remove a tag from a customer",
+        "description": "**Required scope:** `write:customers`\n\nRemoves a tag assignment from the customer.",
+        "responses": {
+          "204": { "description": "Tag removed." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/{id}/timeline": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Customer id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Customers"],
+        "operationId": "getCustomerTimeline",
+        "summary": "Get a customer's event timeline",
+        "description": "**Required scope:** `read:customers`\n\nReturns the customer's communication timeline, with optional filtering by channel, direction, subject, and time range, plus cursor pagination.",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque pagination cursor.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of entries to return (1-100).",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100 }
+          },
+          {
+            "name": "channels",
+            "in": "query",
+            "required": false,
+            "description": "Filter by communication channel (repeatable).",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["sms", "email", "call", "ai_session", "in_app", "note_to_self"]
+              }
+            }
+          },
+          {
+            "name": "directions",
+            "in": "query",
+            "required": false,
+            "description": "Filter by direction (repeatable).",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["inbound", "outbound", "internal"]
+              }
+            }
+          },
+          {
+            "name": "subject_type",
+            "in": "query",
+            "required": false,
+            "description": "Filter by subject type.",
+            "schema": {
+              "type": "string",
+              "enum": ["job", "invoice", "quote", "payment", "lead", "maintenance_reminder", "review_prompt", "general"]
+            }
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter by subject id.",
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Only include entries at or after this timestamp.",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Only include entries at or before this timestamp.",
+            "schema": { "type": "string", "format": "date-time" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of timeline entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CustomerTimelineEntry" }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Cursor for the next page, or null when there are no more entries."
+                    }
+                  },
+                  "required": ["results", "next_cursor"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/find-or-create-by-phone": {
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "findOrCreateCustomerByPhone",
+        "summary": "Find or create a customer by phone",
+        "description": "**Required scope:** `write:customers`\n\nLooks up a live customer by normalized (E.164) phone number; creates one if none exists. The body is a discriminated union on `customer_type`. Rate-limited per actor (30/min) and per tenant (200/min).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerFindOrCreateByPhone" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "An existing customer was found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "customer": { "$ref": "#/components/schemas/Customer" },
+                    "was_created": { "type": "boolean", "example": false }
+                  },
+                  "required": ["customer", "was_created"]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "A new customer was created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "customer": { "$ref": "#/components/schemas/Customer" },
+                    "was_created": { "type": "boolean", "example": true }
+                  },
+                  "required": ["customer", "was_created"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/customers/merge": {
+      "post": {
+        "tags": ["Customers"],
+        "operationId": "mergeCustomers",
+        "summary": "Merge two customer records",
+        "description": "**Required scope:** `write:customers`\n\nMerges a duplicate (merged) customer into a survivor record. This is irreversible. Returns 422 for invalid merge requests (e.g. merging a customer into itself), 404 if either customer is missing, and 409 if the merged record was already merged elsewhere.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CustomerMerge" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The surviving customer after merge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "customer": { "$ref": "#/components/schemas/Customer" }
+                  },
+                  "required": ["customer"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": {
+            "description": "The merge request was understood but cannot be processed (e.g. cannot merge a customer into itself, or invalid primary-contact resolution).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "Customer": {
+      "type": "object",
+      "description": "A persisted customer record.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "customer_type": { "type": "string", "enum": ["individual", "company"] },
+        "customer_number": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive", "archived"] },
+        "first_name": { "type": "string", "nullable": true },
+        "last_name": { "type": "string", "nullable": true },
+        "company_name": { "type": "string", "nullable": true },
+        "company_legal_name": { "type": "string", "nullable": true },
+        "industry": { "type": "string", "nullable": true },
+        "display_name": { "type": "string" },
+        "primary_phone": { "type": "string", "nullable": true, "description": "Normalized E.164 phone number." },
+        "primary_phone_input": { "type": "string", "nullable": true, "description": "Phone number as originally entered." },
+        "primary_email": { "type": "string", "nullable": true },
+        "source": { "type": "string", "nullable": true },
+        "source_metadata": { "type": "object", "additionalProperties": true },
+        "acquired_at": { "type": "string", "format": "date-time" },
+        "is_vip": { "type": "boolean" },
+        "do_not_contact": { "type": "boolean" },
+        "do_not_contact_reason": { "type": "string", "nullable": true },
+        "notes_internal": { "type": "string", "nullable": true },
+        "metadata": { "type": "object", "additionalProperties": true },
+        "created_by": { "type": "string", "format": "uuid", "nullable": true },
+        "updated_by": { "type": "string", "format": "uuid", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time", "nullable": true },
+        "merged_into_customer_id": { "type": "string", "format": "uuid", "nullable": true }
+      },
+      "required": [
+        "id", "tenant_id", "customer_type", "customer_number", "status",
+        "display_name", "source_metadata", "acquired_at", "is_vip",
+        "do_not_contact", "metadata", "created_at", "updated_at"
+      ]
+    },
+    "CustomerWithRelations": {
+      "description": "A customer with its live contacts and locations, OR a merge-redirect pointer when the requested record was merged into a survivor.",
+      "allOf": [
+        { "$ref": "#/components/schemas/Customer" },
+        {
+          "type": "object",
+          "properties": {
+            "customer_contacts": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/CustomerContact" }
+            },
+            "customer_locations": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/CustomerLocation" }
+            },
+            "merged_into": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Present only when the requested customer was merged; id of the survivor record. When present, the customer fields and relation arrays are absent."
+            }
+          }
+        }
+      ]
+    },
+    "CustomerSearchResult": {
+      "type": "object",
+      "description": "Condensed customer record returned by the list/search endpoint.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "customer_number": { "type": "string" },
+        "display_name": { "type": "string" },
+        "customer_type": { "type": "string", "enum": ["individual", "company"] },
+        "status": { "type": "string", "enum": ["active", "inactive", "archived"] },
+        "primary_phone": { "type": "string", "nullable": true },
+        "primary_email": { "type": "string", "nullable": true },
+        "is_vip": { "type": "boolean" },
+        "do_not_contact": { "type": "boolean" },
+        "do_not_contact_reason": { "type": "string", "nullable": true },
+        "acquired_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "customer_number", "display_name", "customer_type", "status",
+        "is_vip", "do_not_contact", "acquired_at", "updated_at"
+      ]
+    },
+    "CustomerLocationCreate": {
+      "type": "object",
+      "description": "Service location payload used when creating a customer or a standalone location.",
+      "properties": {
+        "label": { "type": "string" },
+        "location_type": {
+          "type": "string",
+          "enum": ["service", "billing", "mailing", "other"],
+          "default": "service"
+        },
+        "address_line1": { "type": "string", "minLength": 1 },
+        "address_line2": { "type": "string" },
+        "city": { "type": "string", "minLength": 1 },
+        "state": { "type": "string", "minLength": 1 },
+        "postal_code": { "type": "string", "minLength": 1 },
+        "country": { "type": "string", "default": "US" },
+        "is_primary": { "type": "boolean", "default": false },
+        "access_notes": { "type": "string" },
+        "parking_notes": { "type": "string" },
+        "service_notes": { "type": "string" }
+      },
+      "required": ["address_line1", "city", "state", "postal_code"]
+    },
+    "CustomerLocationUpdate": {
+      "type": "object",
+      "description": "Partial update for a service location. All fields optional; unknown keys are ignored.",
+      "properties": {
+        "label": { "type": "string" },
+        "location_type": { "type": "string", "enum": ["service", "billing", "mailing", "other"] },
+        "address_line1": { "type": "string", "minLength": 1 },
+        "address_line2": { "type": "string" },
+        "city": { "type": "string", "minLength": 1 },
+        "state": { "type": "string", "minLength": 1 },
+        "postal_code": { "type": "string", "minLength": 1 },
+        "country": { "type": "string" },
+        "is_primary": { "type": "boolean" },
+        "access_notes": { "type": "string" },
+        "parking_notes": { "type": "string" },
+        "service_notes": { "type": "string" }
+      }
+    },
+    "CustomerPrimaryContact": {
+      "type": "object",
+      "description": "Primary contact details supplied when creating a company customer.",
+      "properties": {
+        "first_name": { "type": "string", "minLength": 1 },
+        "last_name": { "type": "string", "minLength": 1 },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" }
+      },
+      "required": ["first_name", "last_name"]
+    },
+    "CustomerCreate": {
+      "description": "Create-customer payload. Discriminated union on `customer_type`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "IndividualCustomerCreate",
+          "properties": {
+            "customer_type": { "type": "string", "enum": ["individual"] },
+            "first_name": { "type": "string", "minLength": 1 },
+            "last_name": { "type": "string" },
+            "phone": { "type": "string" },
+            "email": { "type": "string", "format": "email" },
+            "notes_internal": { "type": "string", "maxLength": 10000 },
+            "location": { "$ref": "#/components/schemas/CustomerLocationCreate" }
+          },
+          "required": ["customer_type", "first_name"]
+        },
+        {
+          "type": "object",
+          "title": "CompanyCustomerCreate",
+          "properties": {
+            "customer_type": { "type": "string", "enum": ["company"] },
+            "company_name": { "type": "string", "minLength": 1 },
+            "phone": { "type": "string" },
+            "email": { "type": "string", "format": "email" },
+            "notes_internal": { "type": "string", "maxLength": 10000 },
+            "primary_contact": { "$ref": "#/components/schemas/CustomerPrimaryContact" },
+            "location": { "$ref": "#/components/schemas/CustomerLocationCreate" }
+          },
+          "required": ["customer_type", "company_name"]
+        }
+      ],
+      "discriminator": { "propertyName": "customer_type" }
+    },
+    "CustomerUpdate": {
+      "type": "object",
+      "description": "Editable customer fields. Lifecycle fields are rejected; all fields optional.",
+      "properties": {
+        "first_name": { "type": "string", "minLength": 1 },
+        "last_name": { "type": "string", "minLength": 1 },
+        "company_name": { "type": "string", "minLength": 1 },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "notes_internal": { "type": "string", "maxLength": 10000 },
+        "is_vip": { "type": "boolean" },
+        "do_not_contact": { "type": "boolean" },
+        "do_not_contact_reason": { "type": "string", "maxLength": 500, "nullable": true },
+        "source": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "CustomerFindOrCreateByPhone": {
+      "description": "Find-or-create-by-phone payload. Discriminated union on `customer_type`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "IndividualFindOrCreateByPhone",
+          "properties": {
+            "customer_type": { "type": "string", "enum": ["individual"] },
+            "phone": { "type": "string", "minLength": 1 },
+            "first_name": { "type": "string", "minLength": 1 },
+            "last_name": { "type": "string" },
+            "source": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "source_metadata": { "type": "object", "additionalProperties": true }
+          },
+          "required": ["customer_type", "phone", "first_name", "source"]
+        },
+        {
+          "type": "object",
+          "title": "CompanyFindOrCreateByPhone",
+          "properties": {
+            "customer_type": { "type": "string", "enum": ["company"] },
+            "phone": { "type": "string", "minLength": 1 },
+            "company_name": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "source_metadata": { "type": "object", "additionalProperties": true }
+          },
+          "required": ["customer_type", "phone", "company_name", "source"]
+        }
+      ],
+      "discriminator": { "propertyName": "customer_type" }
+    },
+    "CustomerMerge": {
+      "type": "object",
+      "description": "Merge request payload.",
+      "properties": {
+        "survivor_customer_id": { "type": "string", "format": "uuid" },
+        "merged_customer_id": { "type": "string", "format": "uuid" },
+        "primary_contact_resolution": { "type": "string", "enum": ["survivor", "merged"] }
+      },
+      "required": ["survivor_customer_id", "merged_customer_id", "primary_contact_resolution"]
+    },
+    "CustomerContact": {
+      "type": "object",
+      "description": "A contact belonging to a customer.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "is_primary": { "type": "boolean" },
+        "first_name": { "type": "string", "nullable": true },
+        "last_name": { "type": "string", "nullable": true },
+        "title": { "type": "string", "nullable": true },
+        "role": { "type": "string", "enum": ["billing", "service", "decision_maker", "general"], "nullable": true },
+        "phone": { "type": "string", "nullable": true, "description": "Normalized E.164 phone number." },
+        "phone_input": { "type": "string", "nullable": true },
+        "phone_type": { "type": "string", "enum": ["mobile", "landline", "work", "other"], "nullable": true },
+        "phone_can_sms": { "type": "boolean" },
+        "email": { "type": "string", "nullable": true },
+        "email_type": { "type": "string", "enum": ["personal", "work"], "nullable": true },
+        "preferred_channel": { "type": "string", "enum": ["sms", "email", "phone"], "nullable": true },
+        "language": { "type": "string" },
+        "timezone": { "type": "string", "nullable": true },
+        "notes": { "type": "string", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time", "nullable": true }
+      },
+      "required": [
+        "id", "customer_id", "tenant_id", "is_primary", "phone_can_sms",
+        "language", "created_at", "updated_at"
+      ]
+    },
+    "CustomerContactCreate": {
+      "type": "object",
+      "description": "Create-contact payload.",
+      "properties": {
+        "first_name": { "type": "string", "minLength": 1 },
+        "last_name": { "type": "string", "minLength": 1 },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "is_primary": { "type": "boolean", "default": false },
+        "phone_can_sms": { "type": "boolean", "default": true },
+        "role": { "type": "string", "enum": ["billing", "service", "decision_maker", "general"] },
+        "title": { "type": "string" }
+      },
+      "required": ["first_name", "last_name"]
+    },
+    "CustomerContactUpdate": {
+      "type": "object",
+      "description": "Partial update for a contact. All fields optional; unknown keys are ignored.",
+      "properties": {
+        "first_name": { "type": "string", "minLength": 1 },
+        "last_name": { "type": "string", "minLength": 1 },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "is_primary": { "type": "boolean" },
+        "phone_can_sms": { "type": "boolean" },
+        "role": { "type": "string", "enum": ["billing", "service", "decision_maker", "general"] },
+        "title": { "type": "string" }
+      }
+    },
+    "CustomerLocation": {
+      "type": "object",
+      "description": "A service location belonging to a customer.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "location_type": { "type": "string", "enum": ["service", "billing", "mailing", "other"] },
+        "label": { "type": "string", "nullable": true },
+        "is_primary": { "type": "boolean" },
+        "address_line1": { "type": "string" },
+        "address_line2": { "type": "string", "nullable": true },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "postal_code": { "type": "string" },
+        "country": { "type": "string" },
+        "latitude": { "type": "number", "nullable": true },
+        "longitude": { "type": "number", "nullable": true },
+        "geocoded_at": { "type": "string", "format": "date-time", "nullable": true },
+        "geocode_provider": { "type": "string", "nullable": true, "description": "Free text; common values are 'google', 'mapbox', 'here'." },
+        "place_id": { "type": "string", "nullable": true },
+        "property_data": { "type": "object", "additionalProperties": true, "nullable": true },
+        "property_data_source": { "type": "string", "enum": ["attom", "zillow", "estated", "manual"], "nullable": true },
+        "property_data_fetched_at": { "type": "string", "format": "date-time", "nullable": true },
+        "access_notes": { "type": "string", "nullable": true },
+        "parking_notes": { "type": "string", "nullable": true },
+        "service_notes": { "type": "string", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time", "nullable": true }
+      },
+      "required": [
+        "id", "customer_id", "tenant_id", "location_type", "is_primary",
+        "address_line1", "city", "state", "postal_code", "country",
+        "created_at", "updated_at"
+      ]
+    },
+    "CustomerBillingProfile": {
+      "type": "object",
+      "description": "A customer's billing profile (one per customer, trigger-created).",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "payment_terms_days": { "type": "integer" },
+        "default_tax_rate": { "type": "number", "nullable": true, "description": "Per-customer override; null falls back to the tenant default." },
+        "tax_exempt": { "type": "boolean" },
+        "tax_exempt_id": { "type": "string", "nullable": true },
+        "stripe_customer_id": { "type": "string", "nullable": true },
+        "default_payment_method_id": { "type": "string", "nullable": true },
+        "ach_authorized": { "type": "boolean" },
+        "ach_authorized_at": { "type": "string", "format": "date-time", "nullable": true },
+        "billing_contact_id": { "type": "string", "format": "uuid", "nullable": true },
+        "auto_send_invoices": { "type": "boolean" },
+        "send_payment_reminders": { "type": "boolean" },
+        "credit_balance_cents": { "type": "integer", "description": "Owned by the payments subsystem; do not mutate from application code." },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "customer_id", "tenant_id", "payment_terms_days", "tax_exempt",
+        "ach_authorized", "auto_send_invoices", "send_payment_reminders",
+        "credit_balance_cents", "created_at", "updated_at"
+      ]
+    },
+    "CustomerBillingProfileUpdate": {
+      "type": "object",
+      "description": "Partial update for a billing profile. All fields optional.",
+      "properties": {
+        "payment_terms_days": { "type": "integer", "minimum": 0, "maximum": 365 },
+        "default_tax_rate": { "type": "number", "minimum": 0, "maximum": 1, "nullable": true },
+        "tax_exempt": { "type": "boolean" },
+        "tax_exempt_id": { "type": "string", "nullable": true },
+        "auto_send_invoices": { "type": "boolean" },
+        "send_payment_reminders": { "type": "boolean" },
+        "billing_contact_id": { "type": "string", "format": "uuid", "nullable": true }
+      }
+    },
+    "CustomerAttachment": {
+      "type": "object",
+      "description": "A file attachment belonging to a customer.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "attachment_type": { "type": "string", "enum": ["msa", "contract", "coi", "photo", "other"] },
+        "label": { "type": "string" },
+        "storage_path": { "type": "string", "description": "Key within the customer-attachments bucket." },
+        "file_name": { "type": "string" },
+        "mime_type": { "type": "string" },
+        "file_size_bytes": { "type": "integer" },
+        "uploaded_by": { "type": "string", "format": "uuid", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id", "customer_id", "tenant_id", "attachment_type", "label",
+        "storage_path", "file_name", "mime_type", "file_size_bytes", "created_at"
+      ]
+    },
+    "CustomerTagAssign": {
+      "type": "object",
+      "description": "Payload to assign a tag to a customer.",
+      "properties": {
+        "tag_id": { "type": "string", "format": "uuid" }
+      },
+      "required": ["tag_id"]
+    },
+    "CustomerTimelineEntry": {
+      "type": "object",
+      "description": "A single communication entry in a customer's timeline.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "kind": { "type": "string", "enum": ["communication"] },
+        "channel": { "type": "string", "enum": ["sms", "email", "call", "ai_session", "in_app", "note_to_self"] },
+        "direction": { "type": "string", "enum": ["inbound", "outbound", "internal"] },
+        "subject": { "type": "string", "nullable": true },
+        "body_preview": { "type": "string" },
+        "status": { "type": "string" },
+        "contact": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "display_name": { "type": "string" }
+          }
+        },
+        "subject_ref": {
+          "type": "object",
+          "nullable": true,
+          "properties": {
+            "type": { "type": "string", "enum": ["job", "invoice", "quote", "payment", "lead", "maintenance_reminder", "review_prompt", "general"] },
+            "id": { "type": "string", "format": "uuid" }
+          }
+        },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "ai_handled": { "type": "boolean" },
+            "failure_reason": { "type": "string", "nullable": true }
+          }
+        }
+      },
+      "required": ["id", "kind", "channel", "direction", "body_preview", "status", "occurred_at", "metadata"]
+    }
+  }
+}

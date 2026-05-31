@@ -1,0 +1,457 @@
+{
+  "tag": {
+    "name": "Crews",
+    "description": "Crews and crew membership."
+  },
+  "paths": {
+    "/crews": {
+      "get": {
+        "tags": ["Crews"],
+        "operationId": "listCrews",
+        "summary": "List crews",
+        "description": "**Required scope:** `read:settings`\n\nLists crews for the tenant. Owner and office callers see all crews; tech callers see only crews they belong to (enforced by row-level security). Archived crews are excluded by default; pass `archived=true` to include them. Each crew includes a derived `member_count`; the full member list is returned by the single-crew endpoint, not here.",
+        "parameters": [
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "description": "When `true`, include archived crews. Defaults to excluding archived crews. Must be exactly `\"true\"` or `\"false\"`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of crews.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["crews"],
+                  "properties": {
+                    "crews": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Crew" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Crews"],
+        "operationId": "createCrew",
+        "summary": "Create a crew",
+        "description": "**Required scope:** `admin:settings`\n\nRestricted to owner and office roles. Creates a crew with the given name. The name is trimmed and must be 1–80 characters after trimming. A name that collides with an existing active (non-archived) crew name in the tenant returns 409. The created crew is returned with `member_count` equal to 0.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CrewCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Crew created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["crew"],
+                  "properties": {
+                    "crew": { "$ref": "#/components/schemas/Crew" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/crews/{crewId}": {
+      "parameters": [
+        {
+          "name": "crewId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Crew identifier."
+        }
+      ],
+      "get": {
+        "tags": ["Crews"],
+        "operationId": "getCrew",
+        "summary": "Get a crew",
+        "description": "**Required scope:** `read:settings`\n\nReturns a single crew including its members. Any tenant member may call this; row-level security determines visibility. Tech callers see only crews they belong to; owner and office see all. A crew that does not exist (or is not visible to the caller) returns 404.",
+        "responses": {
+          "200": {
+            "description": "The crew with its members.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["crew"],
+                  "properties": {
+                    "crew": { "$ref": "#/components/schemas/CrewWithMembers" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Crews"],
+        "operationId": "updateCrew",
+        "summary": "Rename or archive a crew",
+        "description": "**Required scope:** `admin:settings`\n\nRestricted to owner and office roles. Renames and/or archives a crew. At least one of `name` or `archive` must be supplied. `archive: true` sets the archived state; `archive: false` clears it (unarchive). A rename that collides with an existing active crew name returns 409. If the request results in no change, the current crew is returned with `changed: false` and no audit event is emitted.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CrewUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated crew. `changed` indicates whether any field actually changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["crew", "changed"],
+                  "properties": {
+                    "crew": { "$ref": "#/components/schemas/Crew" },
+                    "changed": {
+                      "type": "boolean",
+                      "description": "False when the request was a no-op (no fields changed)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/crews/{crewId}/members": {
+      "parameters": [
+        {
+          "name": "crewId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Crew identifier."
+        }
+      ],
+      "get": {
+        "tags": ["Crews"],
+        "operationId": "listCrewMembers",
+        "summary": "List crew members",
+        "description": "**Required scope:** `read:settings`\n\nLists the members of a crew, ordered by when they were added (ascending). Visibility is gated by row-level security: owner and office see the full roster; tech callers see the roster only for crews they themselves belong to. A crew that does not exist (or is not visible) returns 404.",
+        "responses": {
+          "200": {
+            "description": "The crew's members.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["members"],
+                  "properties": {
+                    "members": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CrewMember" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Crews"],
+        "operationId": "addCrewMember",
+        "summary": "Add a crew member",
+        "description": "**Required scope:** `admin:settings`\n\nRestricted to owner and office roles. Adds a user to a crew. The target `user_id` must already be a member of the tenant; otherwise a 400 is returned with the error code `user_not_in_tenant`. Re-adding an existing member returns 409. A crew that does not exist (or is not visible) returns 404.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CrewMemberCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Member added.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["member"],
+                  "properties": {
+                    "member": { "$ref": "#/components/schemas/CrewMember" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/crews/{crewId}/members/{userId}": {
+      "parameters": [
+        {
+          "name": "crewId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Crew identifier."
+        },
+        {
+          "name": "userId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Identifier of the user to remove from the crew."
+        }
+      ],
+      "delete": {
+        "tags": ["Crews"],
+        "operationId": "removeCrewMember",
+        "summary": "Remove a crew member",
+        "description": "**Required scope:** `admin:settings`\n\nRestricted to owner and office roles. Removes a user from a crew. The operation is idempotent: removing a membership that does not exist returns 200 with `removed: false`. A crew that does not exist (or is not visible) in the tenant returns 404. Note: this endpoint returns 200 with a body rather than 204.",
+        "responses": {
+          "200": {
+            "description": "Removal result. `removed` is true only when a membership row was actually deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["removed"],
+                  "properties": {
+                    "removed": {
+                      "type": "boolean",
+                      "description": "True when a membership was deleted; false when no matching membership existed (idempotent no-op)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "Crew": {
+      "type": "object",
+      "description": "A crew within a tenant.",
+      "required": [
+        "id",
+        "tenant_id",
+        "name",
+        "archived_at",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "member_count"
+      ],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "example": "Tuesday Crew"
+        },
+        "archived_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Timestamp when the crew was archived, or null if active."
+        },
+        "created_by": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "User who created the crew."
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "member_count": {
+          "type": "integer",
+          "description": "Number of members in the crew.",
+          "example": 4
+        }
+      }
+    },
+    "CrewWithMembers": {
+      "type": "object",
+      "description": "A crew including its full member roster.",
+      "required": [
+        "id",
+        "tenant_id",
+        "name",
+        "archived_at",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "members"
+      ],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "example": "Tuesday Crew"
+        },
+        "archived_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Timestamp when the crew was archived, or null if active."
+        },
+        "created_by": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "User who created the crew."
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "members": {
+          "type": "array",
+          "description": "Crew members. Note: items here omit `crew_id`, which is implied by the parent crew.",
+          "items": {
+            "type": "object",
+            "required": ["user_id", "added_by", "added_at"],
+            "properties": {
+              "user_id": { "type": "string", "format": "uuid" },
+              "added_by": {
+                "type": "string",
+                "format": "uuid",
+                "nullable": true,
+                "description": "User who added this member."
+              },
+              "added_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "CrewCreate": {
+      "type": "object",
+      "description": "Payload to create a crew.",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Crew name. Trimmed before validation; must be 1–80 characters after trimming.",
+          "example": "Tuesday Crew"
+        }
+      }
+    },
+    "CrewUpdate": {
+      "type": "object",
+      "description": "Payload to rename and/or archive a crew. At least one of `name` or `archive` must be provided.",
+      "minProperties": 1,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "New crew name. Trimmed before validation; must be 1–80 characters after trimming.",
+          "example": "Wednesday Crew"
+        },
+        "archive": {
+          "type": "boolean",
+          "description": "Set true to archive the crew, false to unarchive it."
+        }
+      }
+    },
+    "CrewMember": {
+      "type": "object",
+      "description": "A crew membership record.",
+      "required": ["crew_id", "user_id", "added_by", "added_at"],
+      "properties": {
+        "crew_id": { "type": "string", "format": "uuid" },
+        "user_id": { "type": "string", "format": "uuid" },
+        "added_by": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "User who added this member."
+        },
+        "added_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "CrewMemberCreate": {
+      "type": "object",
+      "description": "Payload to add a member to a crew.",
+      "required": ["user_id"],
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "User to add. Must already be a member of the tenant."
+        }
+      }
+    }
+  }
+}

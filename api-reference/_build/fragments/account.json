@@ -1,0 +1,82 @@
+{
+  "tag": {
+    "name": "Account",
+    "description": "Per-user account settings, including the personal calendar feed."
+  },
+  "paths": {
+    "/account/calendar-feed": {
+      "parameters": [
+        {
+          "name": "tenantId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Tenant identifier. Accepts either the tenant UUID or the tenant's storefront slug."
+        }
+      ],
+      "delete": {
+        "tags": ["Account"],
+        "operationId": "revokeAccountCalendarFeed",
+        "summary": "Revoke the personal calendar feed token",
+        "description": "**Required scope:** `write:account`\n\nRevokes the caller's currently active personal ICS calendar feed token for this tenant. Any calendar client subscribed with the previous feed URL will stop receiving updates. This operation is idempotent: if no active token exists, it still succeeds. Available to any tenant member (owner, office, or tech).",
+        "responses": {
+          "204": {
+            "description": "The active calendar feed token (if any) was revoked. No response body."
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/account/calendar-feed/rotate": {
+      "parameters": [
+        {
+          "name": "tenantId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "Tenant identifier. Accepts either the tenant UUID or the tenant's storefront slug."
+        }
+      ],
+      "post": {
+        "tags": ["Account"],
+        "operationId": "rotateAccountCalendarFeed",
+        "summary": "Mint or rotate the personal calendar feed",
+        "description": "**Required scope:** `write:account`\n\nMints a new personal ICS calendar feed token for the caller in this tenant, revoking any previously active token first. Returns the absolute, subscribable feed URL containing the raw token. The token is only shown once in this response and cannot be retrieved again; subscribe a calendar client (Apple Calendar, Google Calendar, Outlook) to the returned URL before leaving. Available to any tenant member (owner, office, or tech).",
+        "responses": {
+          "200": {
+            "description": "A new calendar feed token was minted. The response contains the absolute feed URL with the raw token embedded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountCalendarFeed" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "AccountCalendarFeed": {
+      "type": "object",
+      "description": "The newly minted personal ICS calendar feed for the caller. The `url` embeds the single-use raw token and is not retrievable again after this response.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Absolute, subscribable ICS feed URL containing the raw feed token. Shaped as `{origin}/{tenantId}/api/calendar/feed/{token}.ics`.",
+          "example": "https://app.zoop.mom/11111111-1111-1111-1111-111111111111/api/calendar/feed/3b2f1c4e-9a8d-4e7b-bc12-0f1e2d3c4b5a.ics"
+        }
+      },
+      "required": ["url"]
+    }
+  }
+}

@@ -1,0 +1,226 @@
+{
+  "tag": {
+    "name": "Storefront",
+    "description": "Public storefront availability and booking holds."
+  },
+  "paths": {
+    "/storefront/holds": {
+      "parameters": [
+        {
+          "name": "tenantId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" },
+          "description": "Tenant identifier. Accepts either the canonical tenant UUID or the storefront slug; resolved to the canonical UUID before processing."
+        }
+      ],
+      "post": {
+        "tags": ["Storefront"],
+        "operationId": "createStorefrontHold",
+        "summary": "Create a booking hold",
+        "description": "**Required scope:** `public anonymous`\n\nAnonymous public endpoint backing the storefront booking widget. Creates a pending booking hold for the tenant via the `create_booking_hold` SECURITY DEFINER RPC. No authentication is required; abuse is gated by the RPC's per-IP and per-tenant rate limits. At least one of `customer_id`, `guest_email`, or `guest_phone` must be supplied so the owner has a way to confirm the request.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/StorefrontHoldCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Booking hold created. Only the hold id and expiry are returned; no internal scheduling detail is exposed.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StorefrontHold" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/storefront/holds/{id}/accept-suggestion": {
+      "parameters": [
+        {
+          "name": "tenantId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" },
+          "description": "Tenant identifier. Accepts either the canonical tenant UUID or the storefront slug; resolved to the canonical UUID before processing."
+        },
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Identifier of the booking hold for which an alternate slot was suggested."
+        }
+      ],
+      "post": {
+        "tags": ["Storefront"],
+        "operationId": "acceptStorefrontHoldSuggestion",
+        "summary": "Accept a suggested alternate slot",
+        "description": "**Required scope:** `public anonymous`\n\nAnonymous, single-use endpoint a customer hits from a tokenized email link to accept an owner-suggested alternate booking slot. The single-use token is supplied via the `token` query parameter (no request body). On success the suggestion token is atomically consumed and the agreed slot details are returned. The hold remains in `pending` status — the owner still confirms it separately. Any failure mode (expired, replayed, wrong token, hold not pending, hold not found) returns `410 Gone` with no distinguishing detail to avoid leaking hold state. When the request `Accept` header includes `text/html`, an HTML confirmation page is returned instead of JSON.",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "description": "Single-use suggestion token (64-character lowercase hex) from the email link."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Suggestion accepted. Returns the agreed slot details (JSON when the `Accept` header is not `text/html`).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StorefrontHoldSuggestionAccepted" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "410": {
+            "description": "The link cannot be used: the token is expired, already consumed, invalid, or the hold is no longer pending / not found. No distinguishing detail is returned.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StorefrontError" }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "StorefrontHoldCreate": {
+      "type": "object",
+      "description": "Guest-supplied payload to create a booking hold from the storefront widget. At least one of `customer_id`, `guest_email`, or `guest_phone` must be present.",
+      "required": ["requested_start", "requested_end"],
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Identifier of a returning customer the owner has on file. If omitted, contact details are required."
+        },
+        "guest_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "nullable": true,
+          "description": "Guest's name."
+        },
+        "guest_email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 320,
+          "nullable": true,
+          "description": "Guest's email address."
+        },
+        "guest_phone": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 32,
+          "nullable": true,
+          "description": "Guest's phone number."
+        },
+        "guest_address": {
+          "type": "string",
+          "maxLength": 500,
+          "nullable": true,
+          "description": "Guest's address."
+        },
+        "service_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Optional catalog item / service the customer is requesting."
+        },
+        "requested_start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Requested slot start (ISO 8601 date-time)."
+        },
+        "requested_end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Requested slot end (ISO 8601 date-time)."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 2000,
+          "nullable": true,
+          "description": "Optional free-text note from the guest."
+        }
+      }
+    },
+    "StorefrontHold": {
+      "type": "object",
+      "description": "Result of a successful booking-hold creation. Intentionally minimal — no internal scheduling detail is exposed.",
+      "required": ["hold_id", "expires_at"],
+      "properties": {
+        "hold_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Identifier of the created booking hold."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the hold expires (ISO 8601 date-time). The widget displays a confirmation countdown from this value."
+        }
+      }
+    },
+    "StorefrontHoldSuggestionAccepted": {
+      "type": "object",
+      "description": "Agreed slot details returned after a customer accepts an owner-suggested alternate slot.",
+      "required": ["hold_id", "requested_start", "requested_end", "expires_at"],
+      "properties": {
+        "hold_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Identifier of the booking hold."
+        },
+        "requested_start": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Accepted slot start (ISO 8601 date-time)."
+        },
+        "requested_end": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Accepted slot end (ISO 8601 date-time)."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the hold expires (ISO 8601 date-time)."
+        }
+      }
+    },
+    "StorefrontError": {
+      "type": "object",
+      "description": "Generic storefront error envelope.",
+      "properties": {
+        "error": {
+          "description": "Error token or, for validation failures, a flattened Zod error object.",
+          "nullable": true
+        },
+        "errorId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Correlation identifier present on internal (500) errors only.",
+          "nullable": true
+        }
+      }
+    }
+  }
+}

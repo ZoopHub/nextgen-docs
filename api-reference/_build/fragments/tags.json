@@ -1,0 +1,221 @@
+{
+  "tag": {
+    "name": "Tags",
+    "description": "Tags for categorizing records."
+  },
+  "paths": {
+    "/tags": {
+      "get": {
+        "tags": ["Tags"],
+        "operationId": "listTags",
+        "summary": "List tags",
+        "description": "**Required scope:** `read:customers`\n\nList all customer tags for the tenant, ordered by name. Tags are a tenant-level shared label library (not a customer sub-resource). This endpoint returns the full collection as a flat array and is not paginated.",
+        "responses": {
+          "200": {
+            "description": "The tenant's tags, ordered by name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Tag" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Tags"],
+        "operationId": "createTag",
+        "summary": "Create a tag",
+        "description": "**Required scope:** `write:customers`\n\nCreate a new customer tag. Tag names must be unique per tenant — creating a tag with a name already in use returns 409. If `color` is omitted, the database default `#6b7280` is applied.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TagCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created tag.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Tag" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/tags/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The tag's unique identifier."
+        }
+      ],
+      "get": {
+        "tags": ["Tags"],
+        "operationId": "getTag",
+        "summary": "Get a tag",
+        "description": "**Required scope:** `read:customers`\n\nRetrieve a single customer tag by id.",
+        "responses": {
+          "200": {
+            "description": "The requested tag.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Tag" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Tags"],
+        "operationId": "updateTag",
+        "summary": "Update a tag",
+        "description": "**Required scope:** `write:customers`\n\nUpdate a tag's name and/or color. All fields are optional; omitted fields are left unchanged. Renaming to a name already used by another tag in the tenant returns 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TagUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated tag.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Tag" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Tags"],
+        "operationId": "deleteTag",
+        "summary": "Delete a tag",
+        "description": "**Required scope:** `write:customers`\n\nPermanently delete a tag. This is a hard delete: it cascade-deletes the tag's customer assignments. Deleting a tag that does not exist returns 404.",
+        "responses": {
+          "204": {
+            "description": "The tag was deleted. No content is returned."
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "Tag": {
+      "type": "object",
+      "required": ["id", "tenant_id", "name", "color", "created_by", "created_at"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The tag's unique identifier."
+        },
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The tenant that owns the tag."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The tag name. Unique per tenant.",
+          "example": "VIP"
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "6-digit hex color with a leading `#`. Defaults to `#6b7280`.",
+          "example": "#6b7280"
+        },
+        "created_by": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "The id of the user that created the tag, or null."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the tag was created (ISO 8601)."
+        }
+      }
+    },
+    "TagCreate": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The tag name. Must be unique within the tenant.",
+          "example": "VIP"
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "6-digit hex color with a leading `#`. If omitted, the default `#6b7280` is applied.",
+          "example": "#3b82f6"
+        }
+      }
+    },
+    "TagUpdate": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The new tag name. Must be unique within the tenant.",
+          "example": "Priority"
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "6-digit hex color with a leading `#`.",
+          "example": "#ef4444"
+        }
+      }
+    }
+  }
+}

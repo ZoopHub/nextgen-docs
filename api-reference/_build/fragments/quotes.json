@@ -1,0 +1,497 @@
+{
+  "tag": {
+    "name": "Quotes",
+    "description": "Quotes with sections, attachments, PDF rendering, and sharing."
+  },
+  "paths": {
+    "/quotes": {
+      "get": {
+        "tags": ["Quotes"],
+        "operationId": "listQuotes",
+        "summary": "List quotes",
+        "description": "**Required scope:** `read:quotes`\n\nList non-archived quotes for the tenant, newest first. Any tenant member (owner, office, or tech) may read. Uses page-based pagination: pass `page` (1-based); the page size is fixed at 20. Quotes with `status` `archived` are excluded.",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Values below 1 are clamped to 1. Page size is fixed at 20.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of quotes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Quote" }
+                    },
+                    "count": {
+                      "type": "integer",
+                      "nullable": true,
+                      "description": "Total number of non-archived quotes matching the query."
+                    },
+                    "page": {
+                      "type": "integer",
+                      "description": "The page number that was returned."
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "description": "Page size (always 20).",
+                      "example": 20
+                    }
+                  },
+                  "required": ["data", "count", "page", "limit"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Quotes"],
+        "operationId": "createQuote",
+        "summary": "Create a quote",
+        "description": "**Required scope:** `write:quotes`\n\nCreate a new quote. Restricted to the `owner` role (office/tech may read but not author quotes). The quote is created in `draft` status. Optionally include a one-shot `tool_input` (lawn measurement) to create the quote shell and its lawn measurement together; if the embedded tool-input write fails, the quote is rolled back.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/QuoteCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created quote.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Quote" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/quotes/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The quote id."
+        }
+      ],
+      "get": {
+        "tags": ["Quotes"],
+        "operationId": "getQuote",
+        "summary": "Get a quote",
+        "description": "**Required scope:** `read:quotes`\n\nFetch a single quote with its embedded line items, tool inputs, sections (sorted by `sort_order`), and attachments. Any tenant member may read. Each attachment is enriched with a fresh signed URL (valid 1 hour); if signing fails for an individual attachment, that attachment carries `signed_url: null` and `signed_url_error: \"storage_unavailable\"` while the rest of the quote still renders.",
+        "responses": {
+          "200": {
+            "description": "The quote with embedded relations.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/QuoteDetail" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Quotes"],
+        "operationId": "updateQuote",
+        "summary": "Update a quote",
+        "description": "**Required scope:** `write:quotes`\n\nUpdate a quote's scalar fields, line items, sections, and/or lawn tool input in a single atomic transaction. Restricted to the `owner` role. Only the keys supplied are changed. Sections in the `sections` array are upserted by `id`; sections absent from the array are left alone (deletes go through the dedicated section DELETE endpoint). Reassigning `customer_id` to a customer outside the tenant returns 403. Sending `status: \"archived\"` is rejected (use `archived_at` to archive).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/QuoteUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated quote row. On a rare read-after-write failure, a thin body `{ \"id\": \"<uuid>\" }` is returned instead so the client can refetch.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Quote" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Quotes"],
+        "operationId": "archiveQuote",
+        "summary": "Archive a quote",
+        "description": "**Required scope:** `write:quotes`\n\nSoft-delete (archive) a quote by setting its status to `archived`. Restricted to the `owner` role. Returns 204 with no body.",
+        "responses": {
+          "204": { "description": "The quote was archived." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "Quote": {
+      "type": "object",
+      "description": "A quote row.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "title": { "type": "string" },
+        "status": {
+          "type": "string",
+          "description": "Lifecycle status. (The DB additionally uses `archived` to mark soft-deleted quotes, which are excluded from list results.)",
+          "enum": ["draft", "sent", "accepted", "declined"]
+        },
+        "sent_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Set when status transitions to `sent`."
+        },
+        "accepted_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Set when the customer accepts on the public proposal page."
+        },
+        "accepted_by_name": {
+          "type": "string",
+          "nullable": true,
+          "description": "Customer-supplied name captured on the acceptance page."
+        },
+        "declined_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Set when status transitions to `declined`."
+        },
+        "created_by": { "type": "string", "format": "uuid", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "archived_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Null = active. Non-null ISO 8601 timestamp = archived at that instant."
+        }
+      },
+      "required": [
+        "id",
+        "tenant_id",
+        "customer_id",
+        "title",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "additionalProperties": true
+    },
+    "QuoteDetail": {
+      "description": "A quote with its embedded line items, tool inputs, sections, and attachments. The exact column set of the embedded rows is the raw DB row shape; only the confirmed fields are modelled.",
+      "allOf": [
+        { "$ref": "#/components/schemas/Quote" },
+        {
+          "type": "object",
+          "properties": {
+            "quote_line_items": {
+              "type": "array",
+              "items": { "type": "object", "additionalProperties": true },
+              "description": "Raw line-item rows for the quote."
+            },
+            "quote_tool_inputs": {
+              "type": "array",
+              "items": { "type": "object", "additionalProperties": true },
+              "description": "Raw tool-input rows (e.g. lawn measurements)."
+            },
+            "quote_sections": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/QuoteSection" },
+              "description": "Sections, sorted by sort_order ascending."
+            },
+            "quote_attachments": {
+              "type": "array",
+              "items": { "$ref": "#/components/schemas/QuoteAttachment" },
+              "description": "Attachments, each enriched with a fresh signed URL."
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "QuoteCreate": {
+      "type": "object",
+      "description": "Body for creating a quote.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Optional customer to attach the quote to."
+        },
+        "tool_input": {
+          "$ref": "#/components/schemas/QuoteLawnToolInput"
+        }
+      },
+      "required": ["title"],
+      "additionalProperties": false
+    },
+    "QuoteUpdate": {
+      "type": "object",
+      "description": "Sparse update body — only supplied keys are changed.",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Reassign the quote's customer. Must belong to the same tenant (otherwise 403)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "sent", "accepted", "declined"],
+          "description": "Lifecycle status. `archived` is not accepted here; use `archived_at` instead."
+        },
+        "archived_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Pass an ISO 8601 timestamp to archive, or null to un-archive."
+        },
+        "line_items": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/QuoteLineItemInput" }
+        },
+        "sections": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/QuoteSectionPatch" },
+          "description": "Each row is upserted by id. Sections absent from this array are left unchanged."
+        },
+        "tool_input": {
+          "$ref": "#/components/schemas/QuoteLawnToolInput"
+        }
+      },
+      "additionalProperties": false
+    },
+    "QuoteLineItemInput": {
+      "type": "object",
+      "description": "A line item supplied in a quote update.",
+      "properties": {
+        "catalog_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Optional catalog item this line references."
+        },
+        "section_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Null or omitted = quote-level line item. A valid UUID pins the line to that section."
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "unit_price": { "type": "number", "minimum": 0 },
+        "quantity": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Must be positive."
+        },
+        "sort_order": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["description", "unit_price", "quantity"],
+      "additionalProperties": false
+    },
+    "QuoteSectionPatch": {
+      "type": "object",
+      "description": "A section upsert supplied inside a quote update; matched by id.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": {
+          "type": "string",
+          "maxLength": 2000,
+          "nullable": true
+        },
+        "start_on": {
+          "type": "string",
+          "format": "date",
+          "nullable": true,
+          "description": "Date in YYYY-MM-DD format."
+        },
+        "end_on": {
+          "type": "string",
+          "format": "date",
+          "nullable": true,
+          "description": "Date in YYYY-MM-DD format."
+        },
+        "sort_order": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "QuoteLawnToolInput": {
+      "type": "object",
+      "description": "One-shot lawn measurement tool input. On create it attaches a measurement to the new quote; on update it replaces or creates the lawn tool input.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["lawn"]
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "polygon_coords": {
+              "type": "array",
+              "description": "Measured zones. Defaults to an empty array.",
+              "items": { "$ref": "#/components/schemas/QuoteLawnZone" }
+            },
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "area_sqft": { "type": "number", "minimum": 0 },
+            "address": { "type": "string", "minLength": 1, "maxLength": 500 }
+          },
+          "required": ["lat", "lng", "area_sqft", "address"],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional human summary. If omitted, the server derives one from the area and address."
+        }
+      },
+      "required": ["kind", "data"],
+      "additionalProperties": false
+    },
+    "QuoteLawnZone": {
+      "type": "object",
+      "description": "A measured lawn zone.",
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "coords": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "lat": { "type": "number" },
+              "lng": { "type": "number" }
+            },
+            "required": ["lat", "lng"],
+            "additionalProperties": false
+          }
+        },
+        "areaSqFt": { "type": "number" }
+      },
+      "required": ["id", "label", "coords", "areaSqFt"],
+      "additionalProperties": false
+    },
+    "QuoteSection": {
+      "type": "object",
+      "description": "A quote section.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "quote_id": { "type": "string", "format": "uuid" },
+        "label": { "type": "string" },
+        "description": { "type": "string", "nullable": true },
+        "start_on": { "type": "string", "format": "date", "nullable": true },
+        "end_on": { "type": "string", "format": "date", "nullable": true },
+        "sort_order": { "type": "integer" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "quote_id",
+        "label",
+        "description",
+        "start_on",
+        "end_on",
+        "sort_order",
+        "created_at",
+        "updated_at"
+      ],
+      "additionalProperties": true
+    },
+    "QuoteAttachment": {
+      "type": "object",
+      "description": "A quote attachment, enriched with a fresh signed URL on read.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "quote_id": { "type": "string", "format": "uuid" },
+        "section_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Null = pinned at the quote level."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["image", "pdf", "video", "blueprint", "other"]
+        },
+        "storage_path": { "type": "string" },
+        "original_filename": { "type": "string", "nullable": true },
+        "mime_type": { "type": "string", "nullable": true },
+        "size_bytes": { "type": "integer", "nullable": true },
+        "uploaded_by": { "type": "string", "format": "uuid", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" },
+        "signed_url": {
+          "type": "string",
+          "nullable": true,
+          "description": "Fresh signed URL (valid ~1 hour), or null if signing failed for this row."
+        },
+        "signed_url_error": {
+          "type": "string",
+          "enum": ["storage_unavailable"],
+          "description": "Present only when signing failed for this attachment."
+        }
+      },
+      "required": [
+        "id",
+        "quote_id",
+        "section_id",
+        "kind",
+        "storage_path",
+        "created_at"
+      ],
+      "additionalProperties": true
+    }
+  }
+}

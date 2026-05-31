@@ -1,0 +1,384 @@
+{
+  "tag": {
+    "name": "Payments",
+    "description": "Stripe Connect onboarding/management and payment instructions."
+  },
+  "paths": {
+    "/payments/instructions": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "operationId": "savePaymentInstructions",
+        "summary": "Save offline payment instructions",
+        "description": "**Required scope:** `write:payments`\n\nUpdates the authenticated tenant's offline payment instructions. The value is surfaced to customers on invoices when they choose not to pay online (e.g. \"Mail check to PO Box 123, Austin TX\"). Passing `null` \u2014 or a whitespace-only string \u2014 clears the field so the customer-facing UI suppresses the section entirely. The value is trimmed server-side before persisting.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentInstructionsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Instructions saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsOkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/payments/connect": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "operationId": "createPaymentsConnectAccount",
+        "summary": "Create or resume Stripe Connect onboarding",
+        "description": "**Required scope:** `write:payments`\n\nCreates a Stripe Connect Express account for the tenant (if one doesn't already exist), upserts the local processor config row, then returns a fresh Stripe-hosted onboarding URL. The browser navigates to that URL; Stripe returns to the tenant's payment settings return page when KYC is submitted (or when the link expires).\n\nA previously `disconnected` account is treated as fresh-start intent: a new Stripe account is minted rather than reusing the dead account id. The authenticated user must have an email on file (used to seed the Express account).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentsConnectInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stripe-hosted onboarding URL minted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsConnectLink"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
+          "502": {
+            "description": "The Stripe processor call failed (could not start onboarding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/connect/refresh": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "operationId": "refreshPaymentsConnectStatus",
+        "summary": "Refresh Stripe Connect account status",
+        "description": "**Required scope:** `write:payments`\n\nRe-fetches the tenant's Stripe Connect account from Stripe and writes the latest capability flags and requirements onto the local processor config. Called by the return handler after Stripe redirects the merchant back from onboarding, and from any \"Resume setup\" / \"Refresh status\" UI control. Idempotent; safe to call repeatedly.\n\nNote: despite mutating local state, this is exposed as a GET (invoked on a redirect-back navigation). Requires a Stripe account already on file (404 otherwise).",
+        "responses": {
+          "200": {
+            "description": "Latest derived status and capability flags.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsConnectStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
+          "502": {
+            "description": "Could not reach Stripe to retrieve account status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/connect/dashboard-link": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "operationId": "createPaymentsDashboardLink",
+        "summary": "Mint a Stripe Express dashboard login link",
+        "description": "**Required scope:** `read:payments`\n\nMints a single-use, short-lived Stripe Express dashboard login URL for the tenant's Connect account. The frontend opens it in a new tab; the link is not cached. Requires a Stripe account already on file (404 otherwise).",
+        "responses": {
+          "200": {
+            "description": "Single-use Stripe Express dashboard URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsDashboardLink"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
+          "502": {
+            "description": "Could not reach Stripe to mint the dashboard link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/connect/disconnect": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "operationId": "disconnectPaymentsConnectAccount",
+        "summary": "Disconnect the tenant's Stripe Connect account",
+        "description": "**Required scope:** `write:payments`\n\nMarks the tenant's Stripe processor row as `disconnected`, clears the capability flags (`charges_enabled` / `payouts_enabled`), and stops the UI from offering Stripe-backed actions. The Stripe account id is preserved on the row for audit / re-connect history. No Stripe API call is made (Express accounts cannot be deauthorized via API). Requires a Stripe processor row already on file (404 otherwise).",
+        "responses": {
+          "200": {
+            "description": "Account marked disconnected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsOkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "PaymentInstructionsInput": {
+      "type": "object",
+      "required": [
+        "instructions"
+      ],
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "maxLength": 4000,
+          "nullable": true,
+          "description": "Offline payment instructions shown to customers on invoices. Maximum 4000 characters. Pass `null` (or a whitespace-only string) to clear the field. Trimmed server-side before persisting.",
+          "example": "Mail check to PO Box 123, Austin TX 78701"
+        }
+      }
+    },
+    "PaymentsOkResponse": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "Always true on success.",
+          "example": true
+        }
+      }
+    },
+    "PaymentsConnectInput": {
+      "type": "object",
+      "description": "All fields optional; defaults applied server-side. An empty body is accepted.",
+      "properties": {
+        "country": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 2,
+          "default": "US",
+          "description": "ISO 3166-1 alpha-2 country code for the Connect account (exactly 2 characters).",
+          "example": "US"
+        },
+        "businessType": {
+          "type": "string",
+          "enum": [
+            "individual",
+            "company"
+          ],
+          "default": "individual",
+          "description": "Stripe Connect account business type.",
+          "example": "individual"
+        }
+      }
+    },
+    "PaymentsConnectLink": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Stripe-hosted account-onboarding URL. The browser should navigate to this URL to begin/resume KYC.",
+          "example": "https://connect.stripe.com/setup/e/acct_123/abc"
+        }
+      }
+    },
+    "PaymentsDashboardLink": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Single-use, short-lived Stripe Express dashboard login URL.",
+          "example": "https://connect.stripe.com/express/acct_123/abc"
+        }
+      }
+    },
+    "PaymentsConnectStatus": {
+      "type": "object",
+      "required": [
+        "status",
+        "chargesEnabled",
+        "payoutsEnabled",
+        "requirementsCurrentlyDue",
+        "requirementsDisabledReason"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "active",
+            "restricted"
+          ],
+          "description": "Derived local status. `restricted` if any requirement is past-due or a disabled reason is set; `active` if both charges and payouts are enabled; otherwise `pending`.",
+          "example": "active"
+        },
+        "chargesEnabled": {
+          "type": "boolean",
+          "description": "Whether the connected account can accept charges.",
+          "example": true
+        },
+        "payoutsEnabled": {
+          "type": "boolean",
+          "description": "Whether the connected account can receive payouts.",
+          "example": true
+        },
+        "requirementsCurrentlyDue": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Stripe requirement identifiers currently due for the account.",
+          "example": []
+        },
+        "requirementsDisabledReason": {
+          "type": "string",
+          "nullable": true,
+          "description": "Stripe's reason the account is disabled, if any; null when not disabled.",
+          "example": null
+        }
+      }
+    },
+    "PaymentsError": {
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "string",
+          "description": "Human-readable error message.",
+          "example": "Could not reach Stripe"
+        }
+      }
+    }
+  }
+}

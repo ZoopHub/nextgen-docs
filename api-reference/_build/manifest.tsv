@@ -1,0 +1,102 @@
+/.well-known/oauth-protected-resource/route.ts		none — public metadata endpoint, no auth required
+/[tenantId]/api/account/calendar-feed/rotate/route.ts	POST	write:account — mint or rotate the caller's personal ICS feed token
+/[tenantId]/api/account/calendar-feed/route.ts	DELETE	write:account — revoke the caller's personal ICS feed token
+/[tenantId]/api/calendar/availability/route.ts	GET	read:calendar — busy intervals for a range
+/[tenantId]/api/calendar/events/[id]/respond/route.ts	POST	write:calendar — caller responds to their own event invitation
+/[tenantId]/api/calendar/events/[id]/route.ts	GET,PATCH,DELETE	write:calendar — edit or delete a calendar event (with series-edit modes)
+/[tenantId]/api/calendar/events/route.ts	POST	write:calendar — create calendar events (one-off + recurring)
+/[tenantId]/api/calendar/holds/[id]/confirm/route.ts	POST	write:calendar — owner/office endpoint that confirms a pending
+/[tenantId]/api/calendar/holds/[id]/release/route.ts	POST	write:calendar — owner/office declines a pending booking hold
+/[tenantId]/api/calendar/holds/[id]/suggest/route.ts	POST	write:calendar — owner/office endpoint that proposes an alternate
+/[tenantId]/api/calendar/holds/route.ts	GET	read:calendar — holds inbox listing (owner/office only)
+/[tenantId]/api/calendar/items/route.ts	GET	read:calendar — single-fetch for the calendar grid
+/[tenantId]/api/calendar/jobs/[id]/reschedule/route.ts	PATCH	write:jobs — calendar-side verb for drag-drop / move
+/[tenantId]/api/catalog-categories/[id]/route.ts	PATCH,DELETE	read:catalog_categories write:catalog_categories — catalog category by ID: update (PATCH), delete (DELETE). Session-authed via getApiAuthContext; this annotation is catalog metadata for the external MCP/API surface.
+/[tenantId]/api/catalog-categories/route.ts	GET,POST	read:catalog_categories write:catalog_categories — catalog categories list (GET) / create (POST). Session-authed via getApiAuthContext; this annotation is catalog metadata for the external MCP/API surface.
+/[tenantId]/api/catalog-items/[id]/image/route.ts	POST	internal — session-only catalog item image upload; will migrate to [tenantId]/api/
+/[tenantId]/api/catalog-items/[id]/price-history/route.ts	GET	internal — session-only price history; will migrate to [tenantId]/api/
+/[tenantId]/api/catalog-items/[id]/route.ts	GET,PATCH,DELETE	read:catalog_items write:catalog_items — catalog item by ID: get (GET), update (PATCH), archive (DELETE). Session-authed via getApiAuthContext; this annotation is catalog metadata for the external MCP/API surface.
+/[tenantId]/api/catalog-items/bulk-import/commit/route.ts	POST	internal — session-only bulk import commit; will migrate to [tenantId]/api/
+/[tenantId]/api/catalog-items/bulk-import/parse/route.ts	POST	internal — session-only CSV parse step; will migrate to [tenantId]/api/
+/[tenantId]/api/catalog-items/route.ts	GET,POST	read:catalog_items write:catalog_items — catalog items list (GET) / create (POST). Session-authed via getApiAuthContext; this annotation is catalog metadata for the external MCP/API surface.
+/[tenantId]/api/communications/[id]/associate-customer/route.ts	PATCH	write:communications — link a communication thread to a customer
+/[tenantId]/api/communications/email/route.ts	POST	write:communications — send an email on behalf of the tenant
+/[tenantId]/api/communications/sms/route.ts	POST	write:communications — send an SMS on behalf of the tenant
+/[tenantId]/api/communications/unknown-inbound/route.ts	GET	read:communications — list inbound communications not yet linked to a customer
+/[tenantId]/api/companies/active/route.ts	POST	internal — sets active-tenant cookie, session-only UI utility
+/[tenantId]/api/companies/current/route.ts	GET,PATCH	read:companies — get current company profile
+/[tenantId]/api/companies/route.ts	GET,POST	write:companies — create/update company profile
+/[tenantId]/api/crews/[crewId]/members/[userId]/route.ts	DELETE	admin:settings — remove a member from a crew
+/[tenantId]/api/crews/[crewId]/members/route.ts	GET,POST	read:settings (GET), admin:settings (POST) — list + add crew members
+/[tenantId]/api/crews/[crewId]/route.ts	GET,PATCH	read:settings (GET), admin:settings (PATCH) — single crew + rename/archive
+/[tenantId]/api/crews/route.ts	GET,POST	read:settings (GET), admin:settings (POST) — list + create crews
+/[tenantId]/api/customers/[id]/archive/route.ts	POST	write:customers — archive a customer (owner|admin only)
+/[tenantId]/api/customers/[id]/attachments/[attachmentId]/route.ts	GET,DELETE	read:customers write:customers — single customer attachment
+/[tenantId]/api/customers/[id]/attachments/route.ts	GET,POST	read:customers write:customers — customer file attachments
+/[tenantId]/api/customers/[id]/billing-profile/route.ts	GET,PATCH,DELETE	read:customers write:customers — customer billing profile
+/[tenantId]/api/customers/[id]/contacts/[contactId]/promote-to-primary/route.ts	POST	write:customers — promote a contact to primary
+/[tenantId]/api/customers/[id]/contacts/[contactId]/route.ts	GET,PATCH,DELETE	read:customers write:customers — get, update, or delete a contact
+/[tenantId]/api/customers/[id]/contacts/route.ts	GET,POST	read:customers write:customers — list and create contacts for a customer
+/[tenantId]/api/customers/[id]/duplicate-candidates/route.ts	GET	read:customers — find potential duplicate customers
+/[tenantId]/api/customers/[id]/locations/[locationId]/route.ts	GET,PATCH,DELETE	read:customers write:customers — get, update, or delete a location
+/[tenantId]/api/customers/[id]/locations/route.ts	GET,POST	read:customers write:customers — list and create service locations
+/[tenantId]/api/customers/[id]/portal-token/route.ts	POST,DELETE	write:customers — mint / revoke a customer's portal token
+/[tenantId]/api/customers/[id]/route.ts	GET,PATCH,DELETE	read:customers write:customers — get, update, or delete a customer
+/[tenantId]/api/customers/[id]/tags/[tagId]/route.ts	DELETE	write:customers — remove a tag from a customer
+/[tenantId]/api/customers/[id]/tags/route.ts	POST	write:customers — add tags to a customer
+/[tenantId]/api/customers/[id]/timeline/route.ts	GET	read:customers — customer event timeline
+/[tenantId]/api/customers/find-or-create-by-phone/route.ts	POST	write:customers — upsert customer by phone number
+/[tenantId]/api/customers/merge/route.ts	POST	write:customers — merge two duplicate customer records
+/[tenantId]/api/customers/route.ts	GET,POST	read:customers write:customers — list and create customers
+/[tenantId]/api/external-access/[keyId]/route.ts	DELETE	admin:credentials — revoke an API key
+/[tenantId]/api/external-access/route.ts	GET,POST	admin:credentials — list and create API keys for this tenant
+/[tenantId]/api/invoices/[id]/route.ts	GET,PATCH,DELETE	read:invoices write:invoices — fetch, update, and void a single invoice
+/[tenantId]/api/invoices/[id]/send-reminder/route.ts	POST	write:invoices — re-send a sent/overdue invoice without changing its status
+/[tenantId]/api/invoices/[id]/send/route.ts	POST	write:invoices — first-time send of a draft invoice (email + SMS dispatch via outbox)
+/[tenantId]/api/invoices/route.ts	GET,POST	read:invoices write:invoices — list and create invoices
+/[tenantId]/api/job-series/[id]/route.ts	GET,PATCH,DELETE	read:job_series write:job_series — get, update, or delete a job series
+/[tenantId]/api/job-series/route.ts	POST	read:job_series write:job_series — list and create recurring job series
+/[tenantId]/api/jobs/[id]/assign-crew/route.ts	POST	write:jobs — fan a crew out into per-member job_assignments
+/[tenantId]/api/jobs/[id]/done/route.ts	POST	write:jobs — mark a job as complete
+/[tenantId]/api/jobs/[id]/media/[mediaId]/route.ts	DELETE	read:jobs write:jobs — single job media item
+/[tenantId]/api/jobs/[id]/media/route.ts	POST	read:jobs write:jobs — job media attachments
+/[tenantId]/api/jobs/[id]/route.ts	GET,PATCH,DELETE	read:jobs write:jobs — get, update, or delete a job
+/[tenantId]/api/jobs/from-estimate/[estimateId]/route.ts	POST	write:jobs — forwarder to from-quote, preserves URL during deprecation window
+/[tenantId]/api/jobs/route.ts	GET,POST	read:jobs write:jobs — list and create jobs
+/[tenantId]/api/notes/[id]/attachments/[attachmentId]/route.ts	DELETE	internal — delete one note attachment (ZOO-429)
+/[tenantId]/api/notes/[id]/attachments/route.ts	POST,GET	internal — note photo attachments (ZOO-429)
+/[tenantId]/api/notes/[id]/restore-version/route.ts	POST	internal — restore a note version, session-only
+/[tenantId]/api/notes/[id]/route.ts	GET,PATCH,DELETE	read:notes write:notes — get/update/archive a note by ID
+/[tenantId]/api/notes/[id]/versions/route.ts	GET	internal — note version history, session-only
+/[tenantId]/api/notes/route.ts	GET,POST	read:notes write:notes — list/create operational notes
+/[tenantId]/api/notes/subjects/resolve/route.ts	POST	internal — resolve note subject context, session-only
+/[tenantId]/api/payments/connect/dashboard-link/route.ts	POST	read:payments — mint a short-lived Stripe Express dashboard URL
+/[tenantId]/api/payments/connect/disconnect/route.ts	POST	write:payments — disconnect the tenant's Stripe Connect account
+/[tenantId]/api/payments/connect/refresh/route.ts	GET	write:payments — re-fetch the tenant's Stripe Connect status and persist
+/[tenantId]/api/payments/connect/route.ts	POST	write:payments — create / resume the tenant's Stripe Connect account
+/[tenantId]/api/payments/instructions/route.ts	POST	write:payments — save the tenant's offline payment instructions
+/[tenantId]/api/plans/[id]/route.ts	GET,PATCH	read:plans write:plans — fetch and update a single recurring plan
+/[tenantId]/api/plans/route.ts	GET,POST	read:plans write:plans — list and create recurring plans
+/[tenantId]/api/quotes/[id]/route.ts	GET,PATCH,DELETE	read:quotes write:quotes — fetch, update, and archive a single quote
+/[tenantId]/api/quotes/route.ts	GET,POST	read:quotes write:quotes — list and create quotes
+/[tenantId]/api/settings/company/route.ts	GET,PATCH	read:settings write:settings — read and update company settings
+/[tenantId]/api/storefront/holds/[id]/accept-suggestion/route.ts	POST,GET	public anonymous — customer accepts an owner-suggested alternate
+/[tenantId]/api/storefront/holds/route.ts	POST	public anonymous — storefront booking-hold create endpoint
+/[tenantId]/api/tags/[id]/route.ts	GET,PATCH,DELETE	read:customers write:customers — get, update, or delete a customer tag
+/[tenantId]/api/tags/route.ts	GET,POST	read:customers write:customers — list and create customer tags
+/[tenantId]/api/tax-rates/[id]/restore/route.ts	POST	write:settings — restore an archived tax rate
+/[tenantId]/api/tax-rates/[id]/route.ts	PATCH,DELETE	read:tax_rates write:tax_rates — update or archive a tax rate
+/[tenantId]/api/tax-rates/route.ts	GET,POST	read:tax_rates write:tax_rates — list and create tax rates
+/[tenantId]/api/team-members/[userId]/route.ts	PATCH,DELETE	admin:settings — update or remove a tenant member
+/[tenantId]/api/team-members/invitations/[inviteId]/resend/route.ts	POST	admin:settings — resend a pending team invitation
+/[tenantId]/api/team-members/invitations/[inviteId]/route.ts	DELETE	admin:settings — revoke (hard-delete) a pending team invitation
+/[tenantId]/api/team-members/invitations/route.ts	GET	admin:settings — list pending team invitations
+/[tenantId]/api/team-members/route.ts	GET,POST	read:settings (GET), admin:settings (POST) — list + invite team members
+/api/webhooks/resend/email-events/route.ts	POST	none — Resend email-events webhook, Svix-verified
+/api/webhooks/resend/inbound/route.ts	POST	none — Resend inbound email webhook, Svix-verified
+/api/webhooks/stripe/connect/route.ts	POST	none — Stripe Connect webhook, Stripe-signature-verified
+/api/webhooks/stripe/platform/route.ts	POST	none — Stripe Platform webhook (Your account scope), Stripe-signature-verified
+/api/webhooks/twilio/inbound-sms/route.ts	POST	none — Twilio inbound SMS webhook, signature-verified
+/api/webhooks/twilio/sms-status/route.ts	POST	none — Twilio SMS status webhook, signature-verified
+/auth/callback/route.ts	GET	none — Supabase auth OAuth callback, public
+/auth/confirm/route.ts	GET	none — Supabase email confirm, public

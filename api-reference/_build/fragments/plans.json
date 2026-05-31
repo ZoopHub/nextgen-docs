@@ -1,0 +1,438 @@
+{
+  "tag": {
+    "name": "Plans",
+    "description": "Recurring service plans and their lifecycle actions (pause, resume, cancel, skip, charge)."
+  },
+  "paths": {
+    "/plans": {
+      "get": {
+        "tags": ["Plans"],
+        "operationId": "listPlans",
+        "summary": "List recurring plans",
+        "description": "**Required scope:** `read:plans`\n\nReturns the tenant's recurring plans, newest first (ordered by `created_at` descending). Each plan embeds a minimal `customer` object (`id`, `display_name`). This endpoint is not paginated: it returns every plan for the tenant in a single response under the `data` key.",
+        "responses": {
+          "200": {
+            "description": "The tenant's recurring plans.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Plan" },
+                      "description": "The tenant's recurring plans, each with an embedded `customer` summary."
+                    }
+                  },
+                  "required": ["data"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Plans"],
+        "operationId": "createPlan",
+        "summary": "Create a recurring plan",
+        "description": "**Required scope:** `write:plans`\n\nCreates a recurring plan template plus its line items (at least one item is required). The plan and its items are written sequentially; if the item insert fails the plan row is rolled back so no header is ever left without items.\n\n`next_invoice_at` is always computed server-side from `cadence_rrule` and `start_date` (defaulting to now) — any client-supplied value is ignored. The new plan starts with status `active`.\n\nAuto-charge is gated server-side: even if `auto_charge_enabled` is sent as `true`, it is forced to `false` unless an active `auto_pay_recurring` payment consent already exists for the customer. An invalid RRULE returns 400.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PlanCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created plan row. The response also includes a `plan_id` field mirroring `id`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Plan" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/plans/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Recurring plan id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Plans"],
+        "operationId": "getPlan",
+        "summary": "Get a recurring plan",
+        "description": "**Required scope:** `read:plans`\n\nReturns a single recurring plan template plus its line items (in sort order) and an embedded `customer` summary. Returns 404 if the plan does not exist within the caller's tenant.",
+        "responses": {
+          "200": {
+            "description": "The recurring plan, with embedded `customer` and `items`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Plan" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Plans"],
+        "operationId": "updatePlan",
+        "summary": "Update a recurring plan",
+        "description": "**Required scope:** `write:plans`\n\nUpdates the plan template only; previously generated invoices are never retroactively mutated. Every field is optional — only fields present in the body are touched. Unknown keys (including `customer_id`, which cannot be changed) are rejected with 400.\n\nIf `items` is supplied it must contain at least one entry; an empty/zero-item result is rejected with 400. The scalar update and item replacement run as a single atomic RPC.\n\nIf `cadence_rrule` changes, `next_invoice_at` is recomputed from now (an invalid RRULE returns 400). Enabling `auto_charge_enabled` is re-verified against an active `auto_pay_recurring` consent and silently forced to `false` if none exists.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PlanUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated plan, with embedded `customer` and `items`.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Plan" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "Plan": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "A recurring plan template. The list endpoint embeds a minimal `customer` object; the get/update endpoints additionally embed the plan's `items` array. The create endpoint returns the raw plan row plus a `plan_id` field mirroring `id`. Additional database columns may be present.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Plan id." },
+        "plan_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Mirror of `id`. Only present on the create (POST) response."
+        },
+        "tenant_id": { "type": "string", "format": "uuid", "description": "Owning tenant id." },
+        "customer_id": { "type": "string", "format": "uuid", "description": "Customer this plan bills." },
+        "job_series_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Linked job series id, or null."
+        },
+        "title": { "type": "string", "description": "Plan title." },
+        "cadence_rrule": {
+          "type": "string",
+          "description": "iCalendar RRULE string describing the billing cadence."
+        },
+        "timezone": {
+          "type": "string",
+          "description": "Plan timezone. Defaults to `America/Chicago`.",
+          "example": "America/Chicago"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "paused", "cancelled"],
+          "description": "Lifecycle status. New plans start `active`."
+        },
+        "auto_charge_enabled": {
+          "type": "boolean",
+          "description": "Whether the plan auto-charges the customer's saved method. Server-gated on an active `auto_pay_recurring` consent."
+        },
+        "payment_method_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Saved payment method to charge, or null."
+        },
+        "next_invoice_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server-computed timestamp of the next invoice generation."
+        },
+        "last_generated_for": {
+          "type": "string",
+          "format": "date",
+          "nullable": true,
+          "description": "Date of the most recent generated invoice period, or null."
+        },
+        "lead_offset_days": {
+          "type": "integer",
+          "description": "Number of days before the cadence date that the invoice is generated."
+        },
+        "default_tax_rate_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Default tax rate applied to taxable items, or null."
+        },
+        "notes": {
+          "type": "string",
+          "nullable": true,
+          "description": "Free-text internal notes, or null."
+        },
+        "created_by": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "User id that created the plan, or null."
+        },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last-update timestamp." },
+        "customer": {
+          "type": "object",
+          "nullable": true,
+          "additionalProperties": true,
+          "description": "Embedded customer summary.",
+          "properties": {
+            "id": { "type": "string", "format": "uuid", "description": "Customer id." },
+            "display_name": { "type": "string", "nullable": true, "description": "Customer display name." }
+          }
+        },
+        "items": {
+          "type": "array",
+          "description": "Embedded plan line items. Present on the get and update responses.",
+          "items": { "$ref": "#/components/schemas/PlanItem" }
+        }
+      },
+      "required": [
+        "id",
+        "tenant_id",
+        "customer_id",
+        "title",
+        "cadence_rrule",
+        "timezone",
+        "status",
+        "auto_charge_enabled",
+        "next_invoice_at",
+        "lead_offset_days",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "PlanItem": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "A line item on a recurring plan template. Pricing is applied at invoice-generation time, not on the template.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Plan item id." },
+        "tenant_id": { "type": "string", "format": "uuid", "description": "Owning tenant id." },
+        "plan_id": { "type": "string", "format": "uuid", "description": "Parent plan id." },
+        "description": { "type": "string", "description": "Line item description." },
+        "quantity": {
+          "type": "number",
+          "description": "Quantity (numeric(10,2), must be > 0)."
+        },
+        "unit_price": {
+          "type": "number",
+          "description": "Unit price (numeric(12,2), must be >= 0)."
+        },
+        "is_taxable": {
+          "type": "boolean",
+          "description": "Whether this line is taxable. Defaults to true."
+        },
+        "tax_rate_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Per-line tax rate override, or null."
+        },
+        "sort_order": {
+          "type": "integer",
+          "description": "Display/sort order of the line within the plan."
+        },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last-update timestamp." }
+      },
+      "required": [
+        "id",
+        "tenant_id",
+        "plan_id",
+        "description",
+        "quantity",
+        "unit_price",
+        "is_taxable",
+        "sort_order"
+      ]
+    },
+    "PlanItemInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A line item supplied when creating or updating a plan.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Line item description."
+        },
+        "quantity": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Quantity. Must be a positive number."
+        },
+        "unit_price": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Unit price. Must be zero or greater."
+        },
+        "is_taxable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this line is taxable. Defaults to true."
+        },
+        "tax_rate_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Optional per-line tax rate override."
+        }
+      },
+      "required": ["description", "quantity", "unit_price"]
+    },
+    "PlanCreate": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Payload to create a recurring plan. At least one item is required.",
+      "properties": {
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Customer the plan bills."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Plan title."
+        },
+        "cadence_rrule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "iCalendar RRULE string describing the billing cadence. Validated server-side; an invalid value returns 400."
+        },
+        "lead_offset_days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365,
+          "default": 0,
+          "description": "Days before the cadence date that the invoice is generated."
+        },
+        "payment_method_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Saved payment method to charge."
+        },
+        "auto_charge_enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Request auto-charge. Forced to false server-side unless an active `auto_pay_recurring` consent exists for the customer."
+        },
+        "default_tax_rate_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Default tax rate applied to taxable items."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000,
+          "nullable": true,
+          "description": "Free-text internal notes."
+        },
+        "start_date": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "Optional ISO-8601 anchor for the first `next_invoice_at` computation. Defaults to now."
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Plan line items. At least one is required.",
+          "items": { "$ref": "#/components/schemas/PlanItemInput" }
+        }
+      },
+      "required": ["customer_id", "title", "cadence_rrule", "items"]
+    },
+    "PlanUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Payload to update a recurring plan template. All fields are optional; only supplied fields are changed. Unknown keys (including `customer_id`) are rejected with 400. `customer_id` and `status` cannot be changed here — status transitions live on dedicated action routes.",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "New plan title."
+        },
+        "cadence_rrule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "New RRULE. If changed, `next_invoice_at` is recomputed from now; an invalid value returns 400."
+        },
+        "lead_offset_days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365,
+          "description": "New lead-offset days."
+        },
+        "payment_method_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "New saved payment method, or null to clear."
+        },
+        "auto_charge_enabled": {
+          "type": "boolean",
+          "description": "Enable/disable auto-charge. Enabling is re-verified against an active `auto_pay_recurring` consent and forced to false if none exists."
+        },
+        "default_tax_rate_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "New default tax rate, or null to clear."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000,
+          "nullable": true,
+          "description": "New notes, or null to clear."
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Replacement set of plan line items. When present, must contain at least one item; the full item set is replaced.",
+          "items": { "$ref": "#/components/schemas/PlanItemInput" }
+        }
+      }
+    }
+  }
+}

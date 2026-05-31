@@ -1,0 +1,222 @@
+{
+  "tag": {
+    "name": "API Keys",
+    "description": "Create, list, and revoke external API keys for programmatic access."
+  },
+  "paths": {
+    "/external-access": {
+      "get": {
+        "tags": ["API Keys"],
+        "operationId": "listApiKeys",
+        "summary": "List API keys",
+        "description": "**Required scope:** `admin:credentials`\n\nList this tenant's active (non-revoked) API keys, newest first. Owner-only: callers whose tenant membership role is not `owner` receive `403`. The plaintext key value is NEVER returned by this endpoint — only the `key_prefix` (a short non-secret identifier) is included. The full secret is shown exactly once, at creation time. The result is capped at 200 rows.",
+        "responses": {
+          "200": {
+            "description": "The tenant's active API keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ApiKeyRow" }
+                    }
+                  },
+                  "required": ["keys"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["API Keys"],
+        "operationId": "createApiKey",
+        "summary": "Create an API key",
+        "description": "**Required scope:** `admin:credentials`\n\nCreate a new external API key for this tenant. Owner-only: callers whose tenant membership role is not `owner` receive `403`. Granting admin-tier scopes (`admin:tenant`, `admin:billing`, `admin:credentials`) is restricted to owners; a non-owner requesting any admin scope is rejected with `403`. If `expires_at` is supplied it must be an ISO 8601 datetime in the future, otherwise `400` is returned. Issuance is rate-limited per actor and per tenant; exceeding either limit returns `429` with a `Retry-After` header.\n\nThe response contains the plaintext key in the `key` field. This is the ONLY time the full secret is ever returned — it is hashed at rest and cannot be retrieved again. Store it securely on receipt.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ApiKeyCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created API key, including the plaintext `key` shown only once.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiKeyCreateResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/external-access/{keyId}": {
+      "parameters": [
+        {
+          "name": "keyId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "Id of the API key to revoke."
+        }
+      ],
+      "delete": {
+        "tags": ["API Keys"],
+        "operationId": "revokeApiKey",
+        "summary": "Revoke an API key",
+        "description": "**Required scope:** `admin:credentials`\n\nRevoke (permanently disable) an API key by id. Owner-only: callers whose tenant membership role is not `owner` receive `403`. The `keyId` must be a valid UUID, otherwise `400` is returned. Returns `204 No Content` on success. If no matching active key is found for this tenant — wrong tenant, unknown id, or already revoked — the endpoint returns `404`. Revocation is irreversible.",
+        "responses": {
+          "204": {
+            "description": "The API key was revoked. No response body."
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "ApiKeyScope": {
+      "type": "string",
+      "description": "A scope grant from the Zoop scope catalog.",
+      "enum": [
+        "read:customers", "write:customers",
+        "read:catalog", "write:catalog",
+        "read:catalog_items", "write:catalog_items",
+        "read:catalog_categories", "write:catalog_categories",
+        "read:estimates", "write:estimates",
+        "read:quotes", "write:quotes",
+        "read:communications", "write:communications",
+        "read:companies", "write:companies",
+        "read:settings", "write:settings",
+        "read:invoices", "write:invoices",
+        "read:jobs", "write:jobs",
+        "read:job_series", "write:job_series",
+        "read:plans", "write:plans",
+        "read:tax_rates", "write:tax_rates",
+        "read:notes", "write:notes",
+        "read:agent_sessions", "write:agent_sessions",
+        "admin:tenant", "admin:billing", "admin:credentials"
+      ]
+    },
+    "ApiKeyRow": {
+      "description": "A surfaced API key row. The `actor_kind` discriminator correlates with `user_id`: `user` keys carry the issuing user's uuid; `tenant` (service-principal) keys carry `null`. The plaintext key is never included — only the non-secret `key_prefix`.",
+      "oneOf": [
+        { "$ref": "#/components/schemas/ApiKeyRowUser" },
+        { "$ref": "#/components/schemas/ApiKeyRowTenant" }
+      ],
+      "discriminator": {
+        "propertyName": "actor_kind",
+        "mapping": {
+          "user": "#/components/schemas/ApiKeyRowUser",
+          "tenant": "#/components/schemas/ApiKeyRowTenant"
+        }
+      }
+    },
+    "ApiKeyRowUser": {
+      "type": "object",
+      "description": "A user-actor API key. Acts as the issuing user; `user_id` is that user's id.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Unique id of the API key." },
+        "key_prefix": { "type": "string", "description": "Non-secret short prefix of the key, safe to display." },
+        "name": { "type": "string", "description": "Human-readable label for the key." },
+        "scopes": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/ApiKeyScope" },
+          "description": "Scopes granted to this key."
+        },
+        "expires_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Expiry timestamp, or null if the key never expires." },
+        "last_used_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Timestamp of the key's last use, or null if never used." },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "created_by": { "type": "string", "format": "uuid", "description": "Id of the admin user who issued the key." },
+        "actor_kind": { "type": "string", "enum": ["user"], "description": "Discriminator: a user-actor key." },
+        "user_id": { "type": "string", "format": "uuid", "description": "Id of the user this key acts as." }
+      },
+      "required": ["id", "key_prefix", "name", "scopes", "expires_at", "last_used_at", "created_at", "created_by", "actor_kind", "user_id"]
+    },
+    "ApiKeyRowTenant": {
+      "type": "object",
+      "description": "A tenant-actor (service-principal) API key. Belongs to the tenant; `user_id` is always null.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Unique id of the API key." },
+        "key_prefix": { "type": "string", "description": "Non-secret short prefix of the key, safe to display." },
+        "name": { "type": "string", "description": "Human-readable label for the key." },
+        "scopes": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/ApiKeyScope" },
+          "description": "Scopes granted to this key."
+        },
+        "expires_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Expiry timestamp, or null if the key never expires." },
+        "last_used_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Timestamp of the key's last use, or null if never used." },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp." },
+        "created_by": { "type": "string", "format": "uuid", "description": "Id of the admin user who issued the key." },
+        "actor_kind": { "type": "string", "enum": ["tenant"], "description": "Discriminator: a tenant-actor key." },
+        "user_id": { "type": "string", "nullable": true, "description": "Always null for tenant keys (no acting user)." }
+      },
+      "required": ["id", "key_prefix", "name", "scopes", "expires_at", "last_used_at", "created_at", "created_by", "actor_kind", "user_id"]
+    },
+    "ApiKeyCreate": {
+      "type": "object",
+      "description": "Request body for creating an API key.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Human-readable label. Trimmed server-side; must be non-blank (1-100 chars) after trimming.",
+          "example": "Production backend"
+        },
+        "scopes": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/ApiKeyScope" },
+          "default": [],
+          "description": "Scopes to grant. Admin-tier scopes (`admin:*`) require owner role. Defaults to an empty array if omitted.",
+          "example": ["read:customers", "read:invoices"]
+        },
+        "actor_kind": {
+          "type": "string",
+          "enum": ["user", "tenant"],
+          "description": "Whether the key acts as the issuing user (`user`) or as the tenant service principal (`tenant`).",
+          "example": "tenant"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional ISO 8601 expiry. Must be in the future. Omit for a key that never expires.",
+          "example": "2027-01-01T00:00:00.000Z"
+        }
+      },
+      "required": ["name", "actor_kind"]
+    },
+    "ApiKeyCreateResponse": {
+      "type": "object",
+      "description": "Response from creating an API key. The `key` field carries the plaintext secret and is returned ONLY here, exactly once — it cannot be retrieved again.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid", "description": "Id of the newly created key." },
+        "key": { "type": "string", "description": "The plaintext API key secret. Shown exactly once; store it securely now." },
+        "prefix": { "type": "string", "description": "Non-secret short prefix of the key, safe to display and matches `key_prefix` on the row." },
+        "row": {
+          "allOf": [{ "$ref": "#/components/schemas/ApiKeyRow" }],
+          "description": "The full surfaced row for the created key. Omitted if the post-issue re-fetch failed (the key still works; refresh the list to reconcile)."
+        }
+      },
+      "required": ["id", "key", "prefix"]
+    }
+  }
+}

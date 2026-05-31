@@ -1,0 +1,476 @@
+{
+  "tag": {
+    "name": "Invoices",
+    "description": "Invoices, payments, refunds, sending, and lifecycle actions."
+  },
+  "paths": {
+    "/invoices": {
+      "get": {
+        "tags": ["Invoices"],
+        "operationId": "listInvoices",
+        "summary": "List invoices",
+        "description": "**Required scope:** `read:invoices`\n\nList invoices for the tenant, newest first. Uses offset pagination (`page`, fixed page size of 20). When no `status` filter is supplied, voided invoices are excluded. The `status` filter only accepts the five user-facing lifecycle statuses (`draft`, `sent`, `paid`, `overdue`, `void`); any other value returns 400.",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Must be a positive integer (defaults to 1). Page size is fixed at 20.",
+            "schema": { "type": "integer", "minimum": 1, "default": 1 }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by lifecycle status. When omitted, voided invoices are excluded from results.",
+            "schema": {
+              "type": "string",
+              "enum": ["draft", "sent", "paid", "overdue", "void"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of invoices.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Invoice" }
+                    },
+                    "count": {
+                      "type": "integer",
+                      "nullable": true,
+                      "description": "Total number of matching invoices across all pages (exact count)."
+                    },
+                    "page": {
+                      "type": "integer",
+                      "description": "The page number that was returned."
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "description": "Page size (fixed at 20)."
+                    }
+                  },
+                  "required": ["data", "count", "page", "limit"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Invoices"],
+        "operationId": "createInvoice",
+        "summary": "Create an invoice",
+        "description": "**Required scope:** `write:invoices`\n\nOwner role only. Create a draft invoice. There are three creation modes: (1) a fully specified invoice with `customer_id` and optional `line_items` (totals/tax computed server-side); (2) `from_quote_id` to derive the invoice atomically from a quote; or (3) `from_job_id` to derive it from a job. When a `from_*` shortcut is used, `customer_id`/`quote_id`/`job_id`/`line_items` must not be supplied — they are derived from the source row. Returns 404 if a referenced quote/job is not found, and 409 if the source quote is archived.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/InvoiceCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created invoice. Includes all persisted columns plus a duplicate `invoice_id` field. If the post-create re-fetch fails, only `{ id, invoice_id }` is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/Invoice" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "invoice_id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Duplicate of `id`, included for client convenience."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/invoices/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Invoice id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "tags": ["Invoices"],
+        "operationId": "getInvoice",
+        "summary": "Get an invoice",
+        "description": "**Required scope:** `read:invoices`\n\nFetch a single invoice with its embedded customer, quote, and job summaries.",
+        "responses": {
+          "200": {
+            "description": "The invoice with embedded customer / quote / job relations.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InvoiceWithRelations" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Invoices"],
+        "operationId": "updateInvoice",
+        "summary": "Update an invoice",
+        "description": "**Required scope:** `write:invoices`\n\nOwner role only. Update an invoice. Two modes: a scalar update (status / dates / notes / total) and an editor update (`line_items` supplied — totals and tax are recomputed server-side and line items replaced wholesale). Non-status fields can only be edited while the invoice is in `draft` status; supplying any non-status field on a non-draft invoice returns 409. Status-only transitions are permitted on non-draft invoices.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/InvoiceUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated invoice.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Invoice" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Invoices"],
+        "operationId": "voidInvoice",
+        "summary": "Void an invoice (soft-delete)",
+        "description": "**Required scope:** `write:invoices`\n\nOwner role only. Soft-deletes the invoice by setting its status to `void`. Voiding preserves all billing history (past payments stay attached as facts); it is not a hard delete.",
+        "responses": {
+          "204": { "description": "Invoice voided." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/invoices/{id}/send": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Invoice id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Invoices"],
+        "operationId": "sendInvoice",
+        "summary": "Send a draft invoice",
+        "description": "**Required scope:** `write:invoices`\n\nOwner role only. First-time send of a draft invoice. Flips the invoice to `sent` (sets `issued_at` / `finalized_at`, and mints a `public_token` if one does not exist), then enqueues the email/SMS dispatch. Requires the invoice to be in `draft` status (409 otherwise — use send-reminder for subsequent sends) and the customer to have an email or SMS-capable phone (422 otherwise). Takes no request body. Returns the planned delivery list.",
+        "responses": {
+          "200": {
+            "description": "The invoice was marked sent and dispatch was enqueued. Returns the planned deliveries.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InvoiceDeliveryPlan" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": {
+            "description": "The customer has no email or SMS-capable phone to deliver to.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/invoices/{id}/send-reminder": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Invoice id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Invoices"],
+        "operationId": "sendInvoiceReminder",
+        "summary": "Re-send an invoice reminder",
+        "description": "**Required scope:** `write:invoices`\n\nOwner role only. Re-sends an already-sent invoice without changing its status. Allowed only when the invoice is in `sent` or `overdue` status (409 otherwise). Requires the customer to have an email or SMS-capable phone (422 otherwise). Takes no request body. Returns the planned delivery list. Returns 503 if the dispatch could not be enqueued.",
+        "responses": {
+          "200": {
+            "description": "A reminder dispatch was enqueued. Returns the planned deliveries.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InvoiceDeliveryPlan" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": {
+            "description": "The customer has no email or SMS-capable phone to deliver to.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "503": {
+            "description": "The reminder dispatch could not be queued.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "Invoice": {
+      "type": "object",
+      "description": "A persisted invoice record (the raw DB row shape). Lifecycle timestamps are nullable so a draft row can carry literal nulls.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid" },
+        "quote_id": { "type": "string", "format": "uuid", "nullable": true },
+        "job_id": { "type": "string", "format": "uuid", "nullable": true },
+        "recurring_plan_id": { "type": "string", "format": "uuid", "nullable": true },
+        "invoice_number": { "type": "string", "nullable": true },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "sent",
+            "processing",
+            "paid",
+            "overdue",
+            "void",
+            "uncollectible",
+            "dunning",
+            "partially_refunded",
+            "refunded"
+          ],
+          "description": "Lifecycle status. The first five plus `void` are user-facing; `processing`, `uncollectible`, `dunning`, `partially_refunded`, and `refunded` are set by payment/Stripe-sync flows and are not user-writeable."
+        },
+        "subtotal": { "type": "number" },
+        "tax_amount": { "type": "number" },
+        "total": { "type": "number" },
+        "amount_paid": { "type": "number" },
+        "default_tax_rate_id": { "type": "string", "format": "uuid", "nullable": true },
+        "tax_breakdown": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/TaxBreakdownEntry" }
+        },
+        "public_token": { "type": "string", "nullable": true, "description": "Token used to resolve the public customer-facing pay page; minted on first send." },
+        "issued_at": { "type": "string", "format": "date-time", "nullable": true },
+        "due_at": { "type": "string", "format": "date-time", "nullable": true },
+        "finalized_at": { "type": "string", "format": "date-time", "nullable": true },
+        "sent_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Set when status transitions to 'sent'." },
+        "paid_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Set when status transitions to 'paid'." },
+        "overdue_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Set when status transitions to 'overdue'." },
+        "voided_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Set when status transitions to 'void'." },
+        "period_start": { "type": "string", "format": "date-time", "nullable": true },
+        "period_end": { "type": "string", "format": "date-time", "nullable": true },
+        "notes": { "type": "string", "nullable": true },
+        "created_by": { "type": "string", "format": "uuid", "nullable": true },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "archived_at": { "type": "string", "format": "date-time", "nullable": true, "description": "Null = active. Non-null ISO 8601 string = archived at that instant." },
+        "currency": { "type": "string", "description": "ISO-4217 currency code (e.g. 'USD'). Defaults to 'USD'." },
+        "stripe_invoice_id": { "type": "string", "nullable": true, "description": "Stripe Invoice id (in_…) once mirrored/paid via Stripe; null otherwise." }
+      },
+      "required": [
+        "id", "tenant_id", "customer_id", "quote_id", "job_id",
+        "recurring_plan_id", "invoice_number", "status", "subtotal",
+        "tax_amount", "total", "amount_paid", "default_tax_rate_id",
+        "tax_breakdown", "public_token", "issued_at", "due_at", "finalized_at",
+        "sent_at", "paid_at", "overdue_at", "voided_at", "period_start",
+        "period_end", "notes", "created_by", "created_at", "updated_at",
+        "archived_at", "currency", "stripe_invoice_id"
+      ]
+    },
+    "InvoiceWithRelations": {
+      "description": "An invoice with embedded customer, quote, and job summaries (as returned by GET /invoices/{id}).",
+      "allOf": [
+        { "$ref": "#/components/schemas/Invoice" },
+        {
+          "type": "object",
+          "properties": {
+            "customer": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "display_name": { "type": "string" }
+              }
+            },
+            "quote": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "title": { "type": "string", "nullable": true },
+                "status": { "type": "string" }
+              }
+            },
+            "job": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "title": { "type": "string", "nullable": true },
+                "status": { "type": "string" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "TaxBreakdownEntry": {
+      "type": "object",
+      "description": "A single per-rate entry in an invoice's computed tax breakdown.",
+      "properties": {
+        "rate_name": { "type": "string" },
+        "rate_decimal": { "type": "number", "description": "The tax rate as a decimal fraction (e.g. 0.0825 for 8.25%)." },
+        "applied_at_rate_id": { "type": "string", "format": "uuid", "nullable": true },
+        "taxable_amount": { "type": "number" },
+        "tax_amount": { "type": "number" }
+      },
+      "required": ["rate_name", "rate_decimal", "applied_at_rate_id", "taxable_amount", "tax_amount"]
+    },
+    "InvoiceLineItem": {
+      "type": "object",
+      "description": "A line item supplied when creating or editing an invoice.",
+      "properties": {
+        "description": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "quantity": { "type": "number", "exclusiveMinimum": 0 },
+        "unit_price": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Non-negative; may not have more than 2 decimal places."
+        },
+        "is_taxable": { "type": "boolean" },
+        "tax_rate_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Per-line tax rate id, or null to fall back to the invoice-level default_tax_rate_id."
+        }
+      },
+      "required": ["description", "quantity", "unit_price", "is_taxable", "tax_rate_id"]
+    },
+    "InvoiceCreate": {
+      "type": "object",
+      "description": "Create-invoice payload. Supply either a fully specified invoice (customer_id + optional line_items) or one of the from-source shortcuts (from_quote_id / from_job_id). When a shortcut is set, customer_id / quote_id / job_id / line_items must be omitted (they are derived from the source row), and from_quote_id and from_job_id are mutually exclusive.",
+      "properties": {
+        "customer_id": { "type": "string", "format": "uuid", "description": "Required (directly or via a from-source shortcut)." },
+        "quote_id": { "type": "string", "format": "uuid", "nullable": true },
+        "job_id": { "type": "string", "format": "uuid", "nullable": true },
+        "from_quote_id": { "type": "string", "format": "uuid", "description": "Create the invoice atomically from this quote. Derives customer_id and total from the quote." },
+        "from_job_id": { "type": "string", "format": "uuid", "description": "Create the invoice from this job. Derives customer_id, quote_id, and total from the job." },
+        "total": { "type": "number", "minimum": 0, "description": "Used in the legacy/from-source path when no line_items are supplied." },
+        "issued_at": { "type": "string", "format": "date-time", "nullable": true },
+        "due_at": { "type": "string", "format": "date-time", "nullable": true },
+        "notes": { "type": "string", "maxLength": 2000, "nullable": true },
+        "default_tax_rate_id": { "type": "string", "format": "uuid", "nullable": true },
+        "line_items": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/InvoiceLineItem" },
+          "description": "When present, subtotal / tax / total are computed server-side from these lines."
+        }
+      }
+    },
+    "InvoiceUpdate": {
+      "type": "object",
+      "description": "Update-invoice payload. All fields optional. Supply line_items for an editor update (totals/tax recomputed, lines replaced wholesale). Non-status fields are only editable on draft invoices.",
+      "properties": {
+        "customer_id": { "type": "string", "format": "uuid" },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "sent", "paid", "overdue", "void"],
+          "description": "Only the five user-facing lifecycle statuses are accepted; payment/Stripe-sync statuses are not user-writeable."
+        },
+        "archived_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "ISO timestamp to archive, or null to un-archive. Independent of lifecycle status."
+        },
+        "total": { "type": "number", "minimum": 0 },
+        "issued_at": { "type": "string", "format": "date-time", "nullable": true },
+        "due_at": { "type": "string", "format": "date-time", "nullable": true },
+        "notes": { "type": "string", "maxLength": 2000, "nullable": true },
+        "default_tax_rate_id": { "type": "string", "format": "uuid", "nullable": true },
+        "line_items": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/InvoiceLineItem" }
+        }
+      }
+    },
+    "InvoiceDeliveryPlan": {
+      "type": "object",
+      "description": "The planned email/SMS deliveries returned by the send and send-reminder endpoints.",
+      "properties": {
+        "deliveries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "channel": { "type": "string", "enum": ["email", "sms"] },
+              "recipient": { "type": "string", "description": "The email address or phone number the message will be sent to." }
+            },
+            "required": ["channel", "recipient"]
+          }
+        }
+      },
+      "required": ["deliveries"]
+    }
+  }
+}

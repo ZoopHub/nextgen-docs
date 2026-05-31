@@ -1,0 +1,374 @@
+{
+  "tag": {
+    "name": "Job Series",
+    "description": "Recurring job series."
+  },
+  "paths": {
+    "/job-series": {
+      "post": {
+        "tags": ["Job Series"],
+        "operationId": "createJobSeries",
+        "summary": "Create a job series",
+        "description": "**Required scope:** `write:job_series`\n\nCreates a recurring job series template and synchronously materializes the first rolling window of job instances. Validates that every entry in `assigned_user_ids` is a member of the tenant (returns 400 if any are not). The RRULE is restricted to FREQ of DAILY, WEEKLY, MONTHLY, or YEARLY; sub-daily expansion tokens (BYHOUR, BYMINUTE, BYSECOND) are rejected, COUNT must be 1-366, and UNTIL must be within 1825 days of now.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JobSeriesCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Job series created.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobSeries" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/job-series/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "format": "uuid" },
+          "description": "The job series identifier."
+        }
+      ],
+      "get": {
+        "tags": ["Job Series"],
+        "operationId": "getJobSeries",
+        "summary": "Get a job series",
+        "description": "**Required scope:** `read:job_series`\n\nReturns a single job series with its line items, assigned users, customer summary, and up to 20 upcoming job instances ordered by scheduled start.",
+        "responses": {
+          "200": {
+            "description": "The job series.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobSeriesDetail" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "patch": {
+        "tags": ["Job Series"],
+        "operationId": "updateJobSeries",
+        "summary": "Update a job series",
+        "description": "**Required scope:** `write:job_series`\n\nUpdates a job series using one of two edit modes. With `mode=all`, the series row is patched in place and all future unscheduled/scheduled instances are regenerated (done/cancelled instances are preserved). With `mode=this_and_future`, the original series is capped the day before `occurrence_date` (which is required for this mode), future unscheduled/scheduled instances on or after that date are deleted, and a new series is created starting at `occurrence_date` with the patched values — the response is the newly created split series. Only the fields provided are changed; omitted fields are left unchanged (or copied from the original for the split case).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JobSeriesUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated job series (for `mode=all`) or the newly created split series (for `mode=this_and_future`).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobSeries" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Job Series"],
+        "operationId": "deleteJobSeries",
+        "summary": "Cancel a job series",
+        "description": "**Required scope:** `write:job_series`\n\nCancels the entire series by setting its `ends_on` to today and bulk-cancelling all future unscheduled/scheduled instances (instances with status `done` or `cancelled` are left intact as historical record). Returns no content.",
+        "responses": {
+          "204": { "description": "Job series cancelled." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "JobSeriesLineItem": {
+      "type": "object",
+      "required": ["description", "unit_price", "quantity"],
+      "properties": {
+        "catalog_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Optional reference to a catalog item."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Line item description."
+        },
+        "unit_price": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Price per unit (non-negative)."
+        },
+        "quantity": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Quantity (must be positive)."
+        },
+        "sort_order": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional ordering index. Defaults to the item's position in the array."
+        }
+      }
+    },
+    "JobSeriesCreate": {
+      "type": "object",
+      "required": ["title", "rrule", "timezone", "dtstart"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Series title."
+        },
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "Optional customer this series belongs to."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 5000,
+          "description": "Optional series description."
+        },
+        "flat_price": {
+          "type": "number",
+          "minimum": 0,
+          "nullable": true,
+          "description": "Optional flat price for the series (non-negative)."
+        },
+        "rrule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "RFC 5545 recurrence rule. FREQ must be one of DAILY, WEEKLY, MONTHLY, YEARLY. Sub-daily tokens BYHOUR/BYMINUTE/BYSECOND are rejected. COUNT must be 1-366; UNTIL must be within 1825 days of now.",
+          "example": "RRULE:FREQ=WEEKLY;BYDAY=MO"
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "IANA timezone name (validated via Intl.DateTimeFormat).",
+          "example": "America/New_York"
+        },
+        "dtstart": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Series start date (YYYY-MM-DD).",
+          "example": "2026-06-01"
+        },
+        "ends_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "nullable": true,
+          "description": "Optional end date (YYYY-MM-DD)."
+        },
+        "max_occurrences": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 366,
+          "nullable": true,
+          "description": "Optional cap on the number of materialized occurrences."
+        },
+        "line_items": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/JobSeriesLineItem" },
+          "default": [],
+          "description": "Line items for each generated job instance."
+        },
+        "assigned_user_ids": {
+          "type": "array",
+          "items": { "type": "string", "format": "uuid" },
+          "default": [],
+          "description": "User IDs to assign. Each must be a member of the tenant."
+        }
+      }
+    },
+    "JobSeriesUpdate": {
+      "type": "object",
+      "required": ["mode"],
+      "description": "Patch payload for updating a job series. `occurrence_date` is required when `mode` is `this_and_future`.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["this_and_future", "all"],
+          "description": "Edit mode. `all` patches the series in place; `this_and_future` splits the series at `occurrence_date`."
+        },
+        "occurrence_date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Split point (YYYY-MM-DD). Required when `mode=this_and_future`."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 5000,
+          "nullable": true
+        },
+        "flat_price": {
+          "type": "number",
+          "minimum": 0,
+          "nullable": true
+        },
+        "rrule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "RFC 5545 recurrence rule. Same constraints as on create."
+        },
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "IANA timezone name."
+        },
+        "ends_on": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "nullable": true
+        },
+        "max_occurrences": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 366,
+          "nullable": true
+        },
+        "line_items": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/JobSeriesLineItem" }
+        },
+        "assigned_user_ids": {
+          "type": "array",
+          "items": { "type": "string", "format": "uuid" }
+        }
+      }
+    },
+    "JobSeries": {
+      "type": "object",
+      "description": "A job series row as returned by the database insert/update (the raw `job_series` row). Exact column set is not fully enumerable from the route code (a `select()` of all columns); confirmed identity/echoed fields are listed and additional columns may be present.",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "title": { "type": "string" },
+        "description": { "type": "string", "nullable": true },
+        "flat_price": { "type": "number", "nullable": true },
+        "rrule": { "type": "string" },
+        "timezone": { "type": "string" },
+        "dtstart": { "type": "string", "description": "YYYY-MM-DD" },
+        "ends_on": { "type": "string", "nullable": true, "description": "YYYY-MM-DD" },
+        "max_occurrences": { "type": "integer", "nullable": true },
+        "generated_through": { "type": "string", "description": "Watermark date (YYYY-MM-DD) up to which instances have been materialized." }
+      }
+    },
+    "JobSeriesDetail": {
+      "type": "object",
+      "description": "A job series with its related line items, assignments, customer summary, and upcoming instances (returned by GET /job-series/{id}). The base series columns are spread in; additional columns may be present.",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "customer_id": { "type": "string", "format": "uuid", "nullable": true },
+        "title": { "type": "string" },
+        "description": { "type": "string", "nullable": true },
+        "flat_price": { "type": "number", "nullable": true },
+        "rrule": { "type": "string" },
+        "timezone": { "type": "string" },
+        "dtstart": { "type": "string", "description": "YYYY-MM-DD" },
+        "ends_on": { "type": "string", "nullable": true, "description": "YYYY-MM-DD" },
+        "max_occurrences": { "type": "integer", "nullable": true },
+        "generated_through": { "type": "string", "description": "YYYY-MM-DD" },
+        "job_series_line_items": {
+          "type": "array",
+          "description": "Line items belonging to the series (full rows).",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "series_id": { "type": "string", "format": "uuid" },
+              "catalog_item_id": { "type": "string", "format": "uuid", "nullable": true },
+              "description": { "type": "string" },
+              "unit_price": { "type": "number" },
+              "quantity": { "type": "number" },
+              "sort_order": { "type": "integer" }
+            }
+          }
+        },
+        "job_series_assignments": {
+          "type": "array",
+          "description": "Assigned users (only user_id is selected).",
+          "items": {
+            "type": "object",
+            "required": ["user_id"],
+            "properties": {
+              "user_id": { "type": "string", "format": "uuid" }
+            }
+          }
+        },
+        "customer": {
+          "type": "object",
+          "nullable": true,
+          "description": "Customer summary (id and display_name only).",
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "display_name": { "type": "string" }
+          }
+        },
+        "upcoming_instances": {
+          "type": "array",
+          "description": "Up to 20 upcoming job instances ordered by scheduled_start ascending.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "format": "uuid" },
+              "title": { "type": "string" },
+              "status": { "type": "string" },
+              "scheduled_start": { "type": "string", "nullable": true }
+            }
+          }
+        }
+      }
+    }
+  }
+}

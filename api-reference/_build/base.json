@@ -1,0 +1,100 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Zoop API",
+    "version": "1.0.0-snapshot.2026-05-31",
+    "description": "The Zoop tenant-scoped REST API.\n\nAll endpoints are scoped to a tenant and live under `/{tenantId}/api`. Authenticate with a bearer token — either a Supabase OAuth access token or a Zoop API key (prefixed `zoop_`). Each endpoint requires specific scopes; the required scope is noted in every operation's description.\n\nThis document is a point-in-time snapshot generated from the source route handlers; it is not hand-maintained."
+  },
+  "servers": [
+    {
+      "url": "https://app.zoop.com/{tenantId}/api",
+      "variables": {
+        "tenantId": {
+          "default": "your-tenant-id",
+          "description": "Your tenant UUID or storefront slug."
+        }
+      }
+    }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "tags": [],
+  "paths": {},
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Provide a bearer token in the `Authorization` header: either a Supabase OAuth access token or a Zoop API key (prefixed `zoop_`). Each endpoint requires specific scopes — see the operation description."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "description": "A human-readable error message, or (on 400 validation failures) a flattened field-error object.",
+            "example": "Not found"
+          },
+          "errorId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Correlation id, present on 500 responses, for support to trace the failure server-side."
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request — body failed validation, JSON was malformed, or an unsupported filter was supplied.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid credentials (no token, expired token, revoked key).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Forbidden": {
+        "description": "Authenticated, but the credential lacks the required scope or the caller lacks the required role — or a cross-site request was blocked.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "The requested resource does not exist (or is not visible to this tenant).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Conflict": {
+        "description": "The request conflicts with the current state of the resource (e.g. a duplicate).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "RateLimited": {
+        "description": "Rate limit exceeded.",
+        "headers": {
+          "Retry-After": {
+            "schema": { "type": "integer" },
+            "description": "Seconds to wait before retrying."
+          }
+        },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "ServerError": {
+        "description": "Unexpected server error. The body includes an `errorId` for support correlation.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    },
+    "parameters": {
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": { "type": "string" },
+        "description": "Opaque pagination cursor taken from a previous response's `next_cursor`."
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "description": "Maximum number of items to return (default 50, max 100)."
+      }
+    }
+  }
+}

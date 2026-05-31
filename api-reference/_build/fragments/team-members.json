@@ -1,0 +1,411 @@
+{
+  "tag": {
+    "name": "Team Members",
+    "description": "Team members and their invitations."
+  },
+  "paths": {
+    "/team-members": {
+      "get": {
+        "tags": ["Team Members"],
+        "operationId": "listTeamMembers",
+        "summary": "List team members",
+        "description": "**Required scope:** `read:settings`\n\nList the tenant's team members (any member of the tenant may call this). Supports free-text search (`q`, matches display name / name / email) and a result limit.\n\nThis endpoint also exposes an owner-only existence probe: calling it with `probe=existing-user` and an `email` returns `{ \"exists\": <boolean> }` indicating whether an account already exists for that email. The probe is restricted to owners (office and tech roles receive 403) because account existence is itself sensitive; supplying `probe=existing-user` without a valid `email` returns 400.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Free-text search query, matched against the member's display name, name, and email.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of members to return (defaults to 20).",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100 }
+          },
+          {
+            "name": "probe",
+            "in": "query",
+            "required": false,
+            "description": "Owner-only existence probe. When set to `existing-user`, the response is `{ \"exists\": <boolean> }` instead of the member list, and `email` is required.",
+            "schema": { "type": "string", "enum": ["existing-user"] }
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "description": "Email to check existence for. Required when `probe=existing-user`.",
+            "schema": { "type": "string", "format": "email" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tenant's team members, or — when `probe=existing-user` was supplied — an existence result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "title": "TeamMemberList",
+                      "properties": {
+                        "results": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/TeamMember" }
+                        }
+                      },
+                      "required": ["results"]
+                    },
+                    {
+                      "type": "object",
+                      "title": "TeamMemberExistsProbe",
+                      "properties": {
+                        "exists": {
+                          "type": "boolean",
+                          "description": "Whether an account already exists for the probed email."
+                        }
+                      },
+                      "required": ["exists"]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "post": {
+        "tags": ["Team Members"],
+        "operationId": "inviteTeamMember",
+        "summary": "Invite a team member",
+        "description": "**Required scope:** `admin:settings`\n\nOwner role only (office and tech receive 403). Invites a teammate by email and role. A pending invitation is created and an invite email is sent; re-inviting the same email rotates the invitation token. If the email already belongs to a member of this tenant, returns 409 `already_member` and no email is sent. If the email matches an existing Zoop account in another tenant, the invitation is flagged `is_cross_tenant` and a sign-in (rather than sign-up) email is sent.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TeamMemberInvitationCreate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The created invitation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invitation": { "$ref": "#/components/schemas/TeamMemberInvitation" }
+                  },
+                  "required": ["invitation"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/team-members/{userId}": {
+      "parameters": [
+        {
+          "name": "userId",
+          "in": "path",
+          "required": true,
+          "description": "The user id of the team member.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "patch": {
+        "tags": ["Team Members"],
+        "operationId": "updateTeamMemberRole",
+        "summary": "Update a team member's role",
+        "description": "**Required scope:** `admin:settings`\n\nOwner role only (office and tech receive 403). Changes a member's role. The last remaining owner of a tenant cannot be demoted (returns 409 `last_owner_protected`). Requesting the role the member already has is an idempotent no-op (`changed: false`). When a member is moved out of `owner`, their admin-tier API keys are revoked as part of the same request.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TeamMemberUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The membership after the (possible) role change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "membership": { "$ref": "#/components/schemas/TeamMembership" },
+                    "changed": {
+                      "type": "boolean",
+                      "description": "False when the requested role matched the current role (no-op)."
+                    }
+                  },
+                  "required": ["membership", "changed"]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      },
+      "delete": {
+        "tags": ["Team Members"],
+        "operationId": "removeTeamMember",
+        "summary": "Remove a team member",
+        "description": "**Required scope:** `admin:settings`\n\nOwner role only (office and tech receive 403). Removes a member from the tenant. The last remaining owner cannot be removed (returns 409 `last_owner_protected`). All of the removed member's API keys for this tenant are revoked as part of the same request.",
+        "responses": {
+          "204": { "description": "Member removed." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/team-members/invitations": {
+      "get": {
+        "tags": ["Team Members"],
+        "operationId": "listTeamMemberInvitations",
+        "summary": "List pending invitations",
+        "description": "**Required scope:** `admin:settings`\n\nOwner role only (office and tech receive 403). Lists the tenant's pending (not-yet-accepted) team invitations, most recently invited first.",
+        "responses": {
+          "200": {
+            "description": "The tenant's pending invitations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invitations": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TeamMemberPendingInvitation" }
+                    }
+                  },
+                  "required": ["invitations"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/team-members/invitations/{inviteId}": {
+      "parameters": [
+        {
+          "name": "inviteId",
+          "in": "path",
+          "required": true,
+          "description": "The pending invitation id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "delete": {
+        "tags": ["Team Members"],
+        "operationId": "revokeTeamMemberInvitation",
+        "summary": "Revoke a pending invitation",
+        "description": "**Required scope:** `admin:settings`\n\nOwner role only (office and tech receive 403). Hard-deletes a pending invitation; the invite link stops working. Returns 404 if the invitation does not exist or belongs to another tenant, and 410 `invitation_already_accepted` if the recipient has already accepted (remove the resulting member via `DELETE /team-members/{userId}` instead).",
+        "responses": {
+          "204": { "description": "Invitation revoked." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "410": {
+            "description": "The invitation has already been accepted and cannot be revoked.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    },
+    "/team-members/invitations/{inviteId}/resend": {
+      "parameters": [
+        {
+          "name": "inviteId",
+          "in": "path",
+          "required": true,
+          "description": "The pending invitation id.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "post": {
+        "tags": ["Team Members"],
+        "operationId": "resendTeamMemberInvitation",
+        "summary": "Resend a pending invitation",
+        "description": "**Required scope:** `admin:settings`\n\nOwner role only (office and tech receive 403). Rotates the invitation token, pushes the expiry to 7 days out, and re-sends the invite email. The previous invite link stops working immediately. Returns 404 if the invitation does not exist or belongs to another tenant, and 410 `invitation_already_accepted` if the recipient has already accepted.",
+        "responses": {
+          "200": {
+            "description": "The invitation after rotation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invitation": { "$ref": "#/components/schemas/TeamMemberInvitation" }
+                  },
+                  "required": ["invitation"]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "410": {
+            "description": "The invitation has already been accepted and cannot be resent.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServerError" }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "TeamMemberRole": {
+      "type": "string",
+      "enum": ["owner", "office", "tech"],
+      "description": "A team member's role within the tenant."
+    },
+    "TeamMember": {
+      "type": "object",
+      "description": "A team member of the tenant, as returned by the list endpoint (joined from the membership and the user account).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The member's user id."
+        },
+        "display_name": {
+          "type": "string",
+          "description": "Display name, derived from the account's full name / name / email local-part, falling back to 'Unknown user'."
+        },
+        "avatar_url": {
+          "type": "string",
+          "nullable": true,
+          "description": "Avatar URL, or null when the account has none."
+        },
+        "email": {
+          "type": "string",
+          "description": "The member's account email."
+        },
+        "role": { "$ref": "#/components/schemas/TeamMemberRole" },
+        "last_sign_in_at": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true,
+          "description": "When the member last signed in, or null if never."
+        }
+      },
+      "required": ["id", "display_name", "email", "role"]
+    },
+    "TeamMembership": {
+      "type": "object",
+      "description": "A membership record returned after a role update.",
+      "properties": {
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "user_id": { "type": "string", "format": "uuid" },
+        "role": { "$ref": "#/components/schemas/TeamMemberRole" }
+      },
+      "required": ["tenant_id", "user_id", "role"]
+    },
+    "TeamMemberUpdate": {
+      "type": "object",
+      "description": "Payload to change a member's role.",
+      "properties": {
+        "role": { "$ref": "#/components/schemas/TeamMemberRole" }
+      },
+      "required": ["role"]
+    },
+    "TeamMemberInvitationCreate": {
+      "type": "object",
+      "description": "Payload to invite a teammate.",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email address to invite. Trimmed and validated as an email."
+        },
+        "role": { "$ref": "#/components/schemas/TeamMemberRole" }
+      },
+      "required": ["email", "role"]
+    },
+    "TeamMemberInvitation": {
+      "type": "object",
+      "description": "An invitation as returned by the invite (POST) and resend endpoints.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "$ref": "#/components/schemas/TeamMemberRole" },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the invitation expires (7 days from creation/rotation)."
+        },
+        "is_cross_tenant": {
+          "type": "boolean",
+          "description": "True when the invited email already has a Zoop account in another tenant (a sign-in email is sent instead of sign-up). Present on the invite (POST) response; absent on the resend response."
+        }
+      },
+      "required": ["id", "email", "role", "expires_at"]
+    },
+    "TeamMemberPendingInvitation": {
+      "type": "object",
+      "description": "A pending invitation as returned by the list-invitations endpoint.",
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "$ref": "#/components/schemas/TeamMemberRole" },
+        "invited_by": {
+          "type": "string",
+          "format": "uuid",
+          "nullable": true,
+          "description": "User id of the inviter."
+        },
+        "invited_by_name": {
+          "type": "string",
+          "description": "Display name of the inviter, derived from their account; 'Unknown user' if not resolvable."
+        },
+        "invited_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the invitation was created."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the invitation expires."
+        }
+      },
+      "required": ["id", "email", "role", "invited_by_name", "invited_at", "expires_at"]
+    }
+  }
+}
